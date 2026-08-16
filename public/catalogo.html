@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Catálogo — Tom Hanks</title>
+  <link rel="stylesheet" href="css/index.css">
+</head>
+<body class="pagina-catalogo">
+  <header class="topo">
+    <h1>Filmes com Tom Hanks</h1>
+    <button id="btn-logout" class="botao-secundario">Sair</button>
+  </header>
+
+  <main>
+    <p id="mensagem-status" class="status" hidden></p>
+    <div id="lista-filmes" class="grade-filmes"></div>
+  </main>
+
+  <!-- modelo (template) de um card de filme, clonado via JS pra cada filme -->
+  <template id="modelo-card">
+    <article class="card-filme">
+      <img class="poster" alt="">
+      <div class="conteudo-card">
+        <h2 class="titulo-filme"></h2>
+        <p class="sinopse"></p>
+
+        <button class="botao-favoritar">☆ Favoritar</button>
+
+        <div class="secao-comentarios">
+          <form class="form-comentario">
+            <input type="text" class="input-comentario" placeholder="Escreva um comentário..." required>
+            <button type="submit">Comentar</button>
+          </form>
+          <ul class="lista-comentarios"></ul>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script src="js/catalogo.js"></script>
+</body>
+</html>
