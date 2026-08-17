@@ -28,6 +28,7 @@ Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 ├── server.js          # ponto de entrada da aplicação
 ├── db.js              # conexão com o MariaDB
 ├── routes.js          # rotas da API (auth, filmes, favoritos, comentários)
+├── .env.example       # descreve as variáveis de ambiente utilizadas
 ├── Dockerfile
 └── public/             # frontend estático
     ├── login.html
