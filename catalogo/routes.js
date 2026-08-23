@@ -1,6 +1,6 @@
 const express = require('express')
 const bcrypt = require('bcrypt') // geração de hash
-const db = require('./db') // Atrquivo de conexão com BD
+const db = require('./db') // Arquivo de conexão com BD
 
 const router = express.Router()
 

@@ -1,0 +1,274 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #2b2f2b;
+}
+
+/* ---------- telas de login/cadastro ---------- */
+
+.auth-container {
+  width: 100%;
+  max-width: 360px;
+  padding: 32px;
+  background: #f4f7f3;
+  border: 1px solid #dfe8de;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+
+h1 {
+  margin: 0 0 24px;
+  font-size: 1.4rem;
+  text-align: center;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+label {
+  font-size: 0.85rem;
+  color: #6b7a6b;
+  margin-top: 10px;
+}
+
+input {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #cdd9cc;
+  background: #ffffff;
+  color: #2b2f2b;
+  font-size: 0.95rem;
+}
+
+input:focus {
+  outline: none;
+  border-color: #8fbc8f;
+  box-shadow: 0 0 0 3px rgba(143, 188, 143, 0.25);
+}
+
+button {
+  margin-top: 20px;
+  padding: 11px;
+  border: none;
+  border-radius: 6px;
+  background: #8fbc8f;
+  color: #1f2e1f;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #7cae7c;
+}
+
+.erro {
+  margin-top: 14px;
+  color: #c0524a;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.link-secundario {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 0.85rem;
+  color: #6b7a6b;
+}
+
+.link-secundario a {
+  color: #5a9367;
+  text-decoration: none;
+}
+
+.link-secundario a:hover {
+  text-decoration: underline;
+}
+
+/* ---------- tela do catálogo ---------- */
+
+.pagina-catalogo {
+  display: block;
+  align-items: unset;
+  justify-content: unset;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1100px;
+  margin: 0 auto 24px;
+}
+
+.topo h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.botao-secundario {
+  background: transparent;
+  border: 1px solid #cdd9cc;
+  color: #2b2f2b;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-top: 0;
+}
+
+.botao-secundario:hover {
+  border-color: #8fbc8f;
+  background: #f4f7f3;
+}
+
+.status {
+  max-width: 1100px;
+  margin: 0 auto 16px;
+  color: #6b7a6b;
+  text-align: center;
+}
+
+.grade-filmes {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 20px;
+}
+
+.card-filme {
+  background: #f4f7f3;
+  border: 1px solid #e3ece2;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.card-filme:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+  border-color: #8fbc8f;
+}
+
+.poster {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  background: #e3ece2;
+}
+
+.conteudo-card {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.titulo-filme {
+  font-size: 1rem;
+  margin: 0;
+  color: #2b2f2b;
+}
+
+.sinopse {
+  font-size: 0.8rem;
+  color: #6b7a6b;
+  line-height: 1.4;
+  max-height: 4.2em;
+  overflow: hidden;
+}
+
+.botao-favoritar {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid #cdd9cc;
+  color: #2b2f2b;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-top: 0;
+}
+
+.botao-favoritar.favoritado {
+  background: #8fbc8f;
+  border-color: #8fbc8f;
+  color: #1f2e1f;
+}
+
+.secao-comentarios {
+  margin-top: 8px;
+  border-top: 1px solid #e3ece2;
+  padding-top: 10px;
+}
+
+.form-comentario {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.input-comentario {
+  flex: 1 1 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid #cdd9cc;
+  background: #ffffff;
+  color: #2b2f2b;
+  font-size: 0.8rem;
+}
+
+.form-comentario button {
+  margin-top: 0;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #8fbc8f;
+  color: #1f2e1f;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.form-comentario button:hover {
+  background: #7cae7c;
+}
+
+.lista-comentarios {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lista-comentarios li {
+  font-size: 0.8rem;
+  color: #3f4a3f;
+  background: #ffffff;
+  border: 1px solid #e3ece2;
+  padding: 6px 10px;
+  border-radius: 6px;
+}

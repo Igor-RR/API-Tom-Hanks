@@ -1,0 +1,19 @@
+services:
+  catalogo:
+    build: ./catalogo
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - auth-service
+      - mariadb
+
+  auth-service:
+    build: ./auth-service
+    env_file: .env
+    depends_on:
+      - mariadb
+
+  mariadb:
+    image: mariadb:11
+    env_file: .env
