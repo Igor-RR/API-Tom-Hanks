@@ -3,10 +3,20 @@ const bcrypt = require('bcrypt')
 const crypto = require('crypto')
 const nodemailer = require('nodemailer')
 const db = require('./db')
+const rateLimit = require('express-rate-limit')
 
 const router = express.Router()
 
-// validação simples de formato de e-mail -- feita sempre no back, nunca confiando só no <input type="email">
+// Objeto para definir limite de tentativas. Ultrapassados, o usuário deve espara 15 min
+const limitador = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { mensagem: 'Muitas tentativas. Tente novamente mais tarde.' },
+  standardHeaders: true,
+  legacyHeaders: false
+})
+
+// validação do e-mail -- feita sempre no back, nunca confiando só no <input type="email">
 function emailValido(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
@@ -58,7 +68,7 @@ router.post('/cadastro', async (req, res) => {
 // ---------- LOGIN ----------
 // não cria sessão aqui -- só valida e devolve os dados que o catálogo precisa
 // pra decidir se abre sessão e com qual papel
-router.post('/login', async (req, res) => {
+router.post('/login',limitador, async (req, res) => {
   const { email, senha } = req.body
 
   if (!email || !senha) {
@@ -93,7 +103,7 @@ router.post('/login', async (req, res) => {
 })
 
 // ---------- ESQUECI MINHA SENHA ----------
-router.post('/esqueci-senha', async (req, res) => {
+router.post('/esqueci-senha',limitador, async (req, res) => {
   const { email } = req.body
 
   if (!email || !emailValido(email)) {
