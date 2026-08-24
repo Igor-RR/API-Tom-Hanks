@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redefinir senha</title>
+  <link rel="stylesheet" href="css/index.css">
+</head>
+<body>
+  <main class="auth-container">
+    <h1>Redefinir senha</h1>
+
+    <form id="form-redefinir-senha">
+      <label for="nova-senha">Nova senha</label>
+      <input type="password" id="nova-senha" name="nova-senha" required minlength="6" autocomplete="new-password">
+
+      <button type="submit">Redefinir senha</button>
+    </form>
+
+    <p id="mensagem-status" class="status" hidden></p>
+
+    <p class="link-secundario">
+      <a href="login.html">Voltar para o login</a>
+    </p>
+  </main>
+
+  <script src="js/redefinir-senha.js"></script>
+</body>
+</html>

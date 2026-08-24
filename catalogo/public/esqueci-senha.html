@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Esqueci minha senha</title>
+  <link rel="stylesheet" href="css/index.css">
+</head>
+<body>
+  <main class="auth-container">
+    <h1>Esqueci minha senha</h1>
+
+    <form id="form-esqueci-senha">
+      <label for="email">E-mail</label>
+      <input type="email" id="email" name="email" required autocomplete="email">
+
+      <button type="submit">Enviar link de redefinição</button>
+    </form>
+
+    <p id="mensagem-status" class="status" hidden></p>
+
+    <p class="link-secundario">
+      <a href="login.html">Voltar para o login</a>
+    </p>
+  </main>
+
+  <script src="js/esqueci-senha.js"></script>
+</body>
+</html>
