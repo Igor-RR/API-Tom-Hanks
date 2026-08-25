@@ -1,4 +1,5 @@
 const express = require('express')
+const rateLimit = require('express-rate-limit')
 const db = require('./db')
 
 const router = express.Router()
@@ -18,6 +19,25 @@ function exigirAdmin(req, res, next) {
   }
   next()
 }
+
+// limite pra ações de escrita (favoritar, comentar, apagar) -- evita sobrecarregar o banco
+// com cliques repetidos ou chamadas automatizadas em loop
+const limitadorEscrita = rateLimit({
+  windowMs: 60 * 1000, // 1 minuto
+  max: 20,
+  message: { mensagem: 'Muitas requisições. Aguarde um momento.' },
+  standardHeaders: true,
+  legacyHeaders: false
+})
+
+// ---------- USUÁRIO LOGADO ----------
+
+router.get('/me', exigirLogin, (req, res) => {
+  res.json({
+    usuario_id: req.session.usuario_id,
+    role: req.session.role
+  })
+})
 
 // ---------- PROXY PRO AUTH-SERVICE ----------
 
@@ -148,7 +168,7 @@ router.get('/favoritos', exigirLogin, async (req, res) => {
   }
 })
 
-router.post('/favoritos', exigirLogin, async (req, res) => {
+router.post('/favoritos', exigirLogin, limitadorEscrita, async (req, res) => {
   const { tmdb_movie_id, titulo, poster_path } = req.body
 
   if (!tmdb_movie_id || !titulo) {
@@ -171,7 +191,7 @@ router.post('/favoritos', exigirLogin, async (req, res) => {
   }
 })
 
-router.delete('/favoritos/:tmdb_movie_id', exigirLogin, async (req, res) => {
+router.delete('/favoritos/:tmdb_movie_id', exigirLogin, limitadorEscrita, async (req, res) => {
   try {
     await db.query(
       'DELETE FROM favoritos WHERE usuario_id = ? AND tmdb_movie_id = ?',
@@ -188,10 +208,22 @@ router.delete('/favoritos/:tmdb_movie_id', exigirLogin, async (req, res) => {
 
 router.get('/comentarios/:tmdb_movie_id', exigirLogin, async (req, res) => {
   try {
-    const [comentarios] = await db.query(
-      'SELECT * FROM comentarios WHERE usuario_id = ? AND tmdb_movie_id = ?',
-      [req.session.usuario_id, req.params.tmdb_movie_id]
-    )
+    let comentarios
+
+    if (req.session.role === 'admin') {
+      const [linhas] = await db.query(
+        'SELECT * FROM comentarios WHERE tmdb_movie_id = ?',
+        [req.params.tmdb_movie_id]
+      )
+      comentarios = linhas
+    } else {
+      const [linhas] = await db.query(
+        'SELECT * FROM comentarios WHERE usuario_id = ? AND tmdb_movie_id = ?',
+        [req.session.usuario_id, req.params.tmdb_movie_id]
+      )
+      comentarios = linhas
+    }
+
     res.json(comentarios)
   } catch (err) {
     console.error(err)
@@ -199,7 +231,7 @@ router.get('/comentarios/:tmdb_movie_id', exigirLogin, async (req, res) => {
   }
 })
 
-router.post('/comentarios', exigirLogin, async (req, res) => {
+router.post('/comentarios', exigirLogin, limitadorEscrita, async (req, res) => {
   const { tmdb_movie_id, texto } = req.body
 
   if (!tmdb_movie_id || !texto) {
@@ -218,16 +250,7 @@ router.post('/comentarios', exigirLogin, async (req, res) => {
   }
 })
 
-// devolve dados do usuário logado, incluindo o papel -- usado pelo front pra decidir o que exibir
-router.get('/me', exigirLogin, (req, res) => {
-  res.json({
-    usuario_id: req.session.usuario_id,
-    role: req.session.role
-  })
-})
-
-// apaga qualquer comentário (moderação) -- só admin
-router.delete('/comentarios/:id', exigirLogin, exigirAdmin, async (req, res) => {
+router.delete('/comentarios/:id', exigirLogin, exigirAdmin, limitadorEscrita, async (req, res) => {
   try {
     await db.query('DELETE FROM comentarios WHERE id = ?', [req.params.id])
     res.json({ mensagem: 'Comentário removido pela moderação.' })

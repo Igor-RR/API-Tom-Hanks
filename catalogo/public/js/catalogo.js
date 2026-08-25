@@ -77,6 +77,7 @@ function renderizarFilmes(filmes) {
     const formComentario = card.querySelector('.form-comentario')
     const inputComentario = card.querySelector('.input-comentario')
     const listaComentarios = card.querySelector('.lista-comentarios')
+    const botaoEnviarComentario = formComentario.querySelector('button')
 
     carregarComentarios(filme.tmdb_movie_id, listaComentarios)
 
@@ -85,7 +86,7 @@ function renderizarFilmes(filmes) {
       const texto = inputComentario.value.trim()
       if (!texto) return
 
-      await enviarComentario(filme.tmdb_movie_id, texto)
+      await enviarComentario(filme.tmdb_movie_id, texto, botaoEnviarComentario)
       inputComentario.value = ''
       carregarComentarios(filme.tmdb_movie_id, listaComentarios)
     })
@@ -103,6 +104,7 @@ function atualizarBotaoFavorito(botao, favoritado) {
 async function alternarFavorito(filme, botao) {
   const jaFavoritado = idsFavoritados.has(filme.tmdb_movie_id)
 
+  botao.disabled = true
   try {
     if (jaFavoritado) {
       await fetch(`/api/favoritos/${filme.tmdb_movie_id}`, { method: 'DELETE' })
@@ -124,6 +126,8 @@ async function alternarFavorito(filme, botao) {
 
   } catch (err) {
     mostrarStatus('Erro ao atualizar favorito.')
+  } finally {
+    botao.disabled = false
   }
 }
 
@@ -141,12 +145,12 @@ async function carregarComentarios(tmdbMovieId, listaComentariosEl) {
       textoSpan.textContent = c.texto
       item.appendChild(textoSpan)
 
-      // botão de apagar só aparece pra admin
       if (souAdmin) {
         const botaoApagar = document.createElement('button')
         botaoApagar.textContent = '🗑'
         botaoApagar.className = 'botao-apagar-comentario'
         botaoApagar.addEventListener('click', async () => {
+          botaoApagar.disabled = true
           await apagarComentario(c.id)
           carregarComentarios(tmdbMovieId, listaComentariosEl)
         })
@@ -161,7 +165,8 @@ async function carregarComentarios(tmdbMovieId, listaComentariosEl) {
   }
 }
 
-async function enviarComentario(tmdbMovieId, texto) {
+async function enviarComentario(tmdbMovieId, texto, botao) {
+  botao.disabled = true
   try {
     await fetch('/api/comentarios', {
       method: 'POST',
@@ -170,6 +175,8 @@ async function enviarComentario(tmdbMovieId, texto) {
     })
   } catch (err) {
     mostrarStatus('Erro ao enviar comentário.')
+  } finally {
+    botao.disabled = false
   }
 }
 
