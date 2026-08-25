@@ -97,6 +97,15 @@ button:hover {
   text-decoration: underline;
 }
 
+.link-esqueci-senha {
+  margin-top: 8px;
+  font-size: 0.8rem;
+}
+
+.link-esqueci-senha a {
+  color: #8a978a;
+}
+
 /* ---------- tela do catálogo ---------- */
 
 .pagina-catalogo {
