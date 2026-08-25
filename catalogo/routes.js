@@ -218,6 +218,14 @@ router.post('/comentarios', exigirLogin, async (req, res) => {
   }
 })
 
+// devolve dados do usuário logado, incluindo o papel -- usado pelo front pra decidir o que exibir
+router.get('/me', exigirLogin, (req, res) => {
+  res.json({
+    usuario_id: req.session.usuario_id,
+    role: req.session.role
+  })
+})
+
 // apaga qualquer comentário (moderação) -- só admin
 router.delete('/comentarios/:id', exigirLogin, exigirAdmin, async (req, res) => {
   try {

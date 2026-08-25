@@ -2,8 +2,10 @@ const listaFilmes = document.getElementById('lista-filmes')
 const mensagemStatus = document.getElementById('mensagem-status')
 const modeloCard = document.getElementById('modelo-card')
 const btnLogout = document.getElementById('btn-logout')
+const badgeAdmin = document.getElementById('badge-admin')
 
 let idsFavoritados = new Set()
+let souAdmin = false
 
 function mostrarStatus(texto) {
   mensagemStatus.textContent = texto
@@ -19,9 +21,10 @@ async function iniciar() {
   mostrarStatus('Carregando filmes...')
 
   try {
-    const [respostaFilmes, respostaFavoritos] = await Promise.all([
+    const [respostaFilmes, respostaFavoritos, respostaMe] = await Promise.all([
       fetch('/api/filmes'),
-      fetch('/api/favoritos')
+      fetch('/api/favoritos'),
+      fetch('/api/me')
     ])
 
     if (respostaFilmes.status === 401 || respostaFavoritos.status === 401) {
@@ -31,8 +34,11 @@ async function iniciar() {
 
     const filmes = await respostaFilmes.json()
     const favoritos = await respostaFavoritos.json()
+    const me = await respostaMe.json()
 
     idsFavoritados = new Set(favoritos.map(f => f.tmdb_movie_id))
+    souAdmin = me.role === 'admin'
+    badgeAdmin.hidden = !souAdmin
 
     if (!respostaFilmes.ok) {
       mostrarStatus('Não foi possível carregar os filmes da TMDB.')
@@ -130,7 +136,23 @@ async function carregarComentarios(tmdbMovieId, listaComentariosEl) {
     listaComentariosEl.innerHTML = ''
     comentarios.forEach(c => {
       const item = document.createElement('li')
-      item.textContent = c.texto
+
+      const textoSpan = document.createElement('span')
+      textoSpan.textContent = c.texto
+      item.appendChild(textoSpan)
+
+      // botão de apagar só aparece pra admin
+      if (souAdmin) {
+        const botaoApagar = document.createElement('button')
+        botaoApagar.textContent = '🗑'
+        botaoApagar.className = 'botao-apagar-comentario'
+        botaoApagar.addEventListener('click', async () => {
+          await apagarComentario(c.id)
+          carregarComentarios(tmdbMovieId, listaComentariosEl)
+        })
+        item.appendChild(botaoApagar)
+      }
+
       listaComentariosEl.appendChild(item)
     })
 
@@ -148,6 +170,14 @@ async function enviarComentario(tmdbMovieId, texto) {
     })
   } catch (err) {
     mostrarStatus('Erro ao enviar comentário.')
+  }
+}
+
+async function apagarComentario(id) {
+  try {
+    await fetch(`/api/comentarios/${id}`, { method: 'DELETE' })
+  } catch (err) {
+    mostrarStatus('Erro ao apagar comentário.')
   }
 }
 

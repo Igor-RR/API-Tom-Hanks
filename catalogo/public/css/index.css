@@ -271,4 +271,39 @@ button:hover {
   border: 1px solid #e3ece2;
   padding: 6px 10px;
   border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* ---------- área do usuário / admin ---------- */
+
+.area-usuario {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge-admin {
+  background: #8fbc8f;
+  color: #1f2e1f;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.botao-apagar-comentario {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 6px;
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.botao-apagar-comentario:hover {
+  opacity: 0.7;
 }
