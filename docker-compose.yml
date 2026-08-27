@@ -1,12 +1,14 @@
 services:
   catalogo:
     build: ./catalogo
+    image: igorrueda/api-tom-hanks-microservico:latest
     env_file: .env
     ports:
-      - "3000:3000"
+      - "8229:8229"
     depends_on:
       - auth-service
-      
+
   auth-service:
     build: ./auth-service
+    image: igorrueda/api-tom-hanks-microservico:latest
     env_file: .env
