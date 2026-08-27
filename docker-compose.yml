@@ -1,7 +1,7 @@
 services:
   catalogo:
     build: ./catalogo
-    image: igorrueda/api-tom-hanks-microservico:latest
+    image: igorrueda/api-tom-hanks-microserv-catalogo:latest
     env_file: .env
     ports:
       - "8229:3000"
@@ -10,5 +10,5 @@ services:
 
   auth-service:
     build: ./auth-service
-    image: igorrueda/api-tom-hanks-microservico:latest
+    image: igorrueda/api-tom-hanks-microserv-auth-service:latest
     env_file: .env
