@@ -20,15 +20,14 @@ Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 ## Arquitetura
 
 ```
-Navegador → catálogo (único ponto público)
+Navegador → catálogo (Ponto público)
                 │
                 ├── TMDB (filmes)
                 ├── MariaDB (favoritos, comentários)
                 └── auth-service (rede interna do Docker, sem porta pública)
                           │
                           ├── MariaDB (usuários, reset_tokens)
-                          └── Mailtrap (dev) / Brevo (produção)
-```
+                          └── Mailtrap (Testar a coleta de e-mails)
 
 O `catalogo` é o único serviço com porta publicada. Toda autenticação (login, cadastro, papéis, recuperação de senha) é isolada no `auth-service`, acessível apenas pela rede interna do Docker, pelo nome do serviço (`http://auth-service:<porta>`). O `catalogo` nunca acessa a tabela de usuários diretamente — ele repassa as requisições de auth via HTTP interno e decide a sessão com base na resposta.
 
