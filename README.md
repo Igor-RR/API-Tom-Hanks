@@ -38,7 +38,7 @@ O `catalogo` é o único serviço com porta publicada. Toda autenticação (logi
 - **Banco de dados:** MariaDB (remoto, compartilhado pelos dois serviços)
 - **API externa:** TMDB (The Movie Database)
 - **Autenticação:** express-session (no catálogo) + bcrypt + crypto (no auth-service)
-- **E-mail transacional:** nodemailer — Mailtrap (dev/sandbox) / Brevo (produção)
+- **E-mail transacional:** nodemailer — Mailtrap (dev/sandbox)
 - **Deploy:** Docker + Docker Hub + Docker Compose + Portainer
 
 ## Estrutura do projeto
