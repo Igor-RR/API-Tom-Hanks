@@ -153,7 +153,7 @@ CREATE TABLE comentarios (
 
 ### Promovendo um usuário a admin
 
-Não há tela de administração — a promoção é feita diretamente no banco:
+A promoção de um usuário é feita diretamente no banco:
 ```sql
 UPDATE usuarios SET role = 'admin' WHERE email = 'seu-email@exemplo.com';
 ```
