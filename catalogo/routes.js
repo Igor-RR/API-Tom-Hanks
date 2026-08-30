@@ -301,9 +301,29 @@ router.delete('/comentarios/:id', exigirLogin, exigirNivel('stalker'), limitador
 
 // ---------- TIER LIST ----------
 
-router.get('/tier-list', exigirLogin, async (req, res) => {
+// lista todos os stalkers que já têm uma tier list, com contagem de filmes classificados
+router.get('/tier-lists', exigirLogin, async (req, res) => {
   try {
-    const [linhas] = await db.query('SELECT * FROM tier_list')
+    const [linhas] = await db.query(
+      `SELECT usuario_id, usuario_nome, COUNT(*) AS total_filmes
+       FROM tier_list
+       GROUP BY usuario_id, usuario_nome
+       ORDER BY usuario_nome`
+    )
+    res.json(linhas)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ mensagem: 'Erro ao buscar tier lists.' })
+  }
+})
+
+// tier list completa de um stalker específico
+router.get('/tier-list/:usuario_id', exigirLogin, async (req, res) => {
+  try {
+    const [linhas] = await db.query(
+      'SELECT * FROM tier_list WHERE usuario_id = ? ORDER BY FIELD(tier, "S","A","B","C","D")',
+      [req.params.usuario_id]
+    )
     res.json(linhas)
   } catch (err) {
     console.error(err)
@@ -311,23 +331,37 @@ router.get('/tier-list', exigirLogin, async (req, res) => {
   }
 })
 
+// stalker classifica/reclassifica um filme na própria lista
 router.put('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), limitadorEscrita, async (req, res) => {
-  const { titulo, tier } = req.body
+  const { titulo, poster_path, tier } = req.body
   if (!titulo || !tier) {
     return res.status(400).json({ mensagem: 'Informe título e tier.' })
   }
   try {
     await db.query(
-      `INSERT INTO tier_list (tmdb_movie_id, titulo, tier, atualizado_por)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE titulo = ?, tier = ?, atualizado_por = ?`,
-      [req.params.tmdb_movie_id, titulo, tier, req.usuario.usuario_id, titulo, tier, req.usuario.usuario_id]
+      `INSERT INTO tier_list (usuario_id, usuario_nome, tmdb_movie_id, titulo, poster_path, tier)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE titulo = ?, poster_path = ?, tier = ?`,
+      [req.usuario.usuario_id, req.usuario.nome, req.params.tmdb_movie_id, titulo, poster_path, tier,
+       titulo, poster_path, tier]
     )
-    res.json({ mensagem: 'Tier list atualizada.' })
+    res.json({ mensagem: 'Filme classificado.' })
   } catch (err) {
     console.error(err)
-    res.status(500).json({ mensagem: 'Erro ao atualizar tier list.' })
+    res.status(500).json({ mensagem: 'Erro ao classificar filme.' })
   }
 })
 
-module.exports = router
+// stalker remove um filme da própria lista (volta pro "não classificado")
+router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), limitadorEscrita, async (req, res) => {
+  try {
+    await db.query(
+      'DELETE FROM tier_list WHERE usuario_id = ? AND tmdb_movie_id = ?',
+      [req.usuario.usuario_id, req.params.tmdb_movie_id]
+    )
+    res.json({ mensagem: 'Filme removido da tier list.' })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ mensagem: 'Erro ao remover filme.' })
+  }
+})
