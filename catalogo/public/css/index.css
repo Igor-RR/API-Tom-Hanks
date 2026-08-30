@@ -471,7 +471,7 @@ button:hover {
   line-height: 1.2;
 }
 
-.poster-acoes {
+.poster-acoes:not([hidden]) {
   display: flex;
   gap: 4px;
 }

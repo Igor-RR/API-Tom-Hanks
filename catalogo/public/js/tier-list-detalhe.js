@@ -5,14 +5,16 @@ const secaoNaoClassificados = document.getElementById('secao-nao-classificados')
 const listaNaoClassificados = document.getElementById('lista-nao-classificados')
 const modeloFileira = document.getElementById('modelo-fileira-tier')
 const modeloPoster = document.getElementById('modelo-poster-tier')
-
+const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
 const TIERS = ['S', 'A', 'B', 'C', 'D']
 
 const params = new URLSearchParams(window.location.search)
 const usuarioIdDaLista = params.get('usuario_id')
 
 let meuUsuarioId = null
+let meuRole = 'espectador'
 let ehMinhaLista = false
+let souStalker = false
 
 function mostrarStatus(texto) {
   mensagemStatus.textContent = texto
@@ -41,7 +43,12 @@ async function iniciar() {
 
     const me = await respostaMe.json()
     meuUsuarioId = me.usuario_id
-    ehMinhaLista = String(meuUsuarioId) === String(usuarioIdDaLista)
+    meuRole = me.role
+    souStalker = HIERARQUIA.indexOf(meuRole) >= HIERARQUIA.indexOf('stalker')
+    // só é "minha lista editável" se o ID bater E o papel for stalker
+    ehMinhaLista = String(meuUsuarioId) === String(usuarioIdDaLista) && souStalker
+    console.log('DEBUG:', { meuUsuarioId, usuarioIdDaLista, meuRole, souStalker, ehMinhaLista })
+
 
     const tierList = await respostaTierList.json()
     const filmes = await respostaFilmes.json()
