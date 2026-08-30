@@ -368,3 +368,5 @@ router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), 
     res.status(500).json({ mensagem: 'Erro ao remover filme.' })
   }
 })
+
+module.exports = router
