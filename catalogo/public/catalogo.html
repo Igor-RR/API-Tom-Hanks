@@ -11,6 +11,7 @@
     <h1>Filmes com Tom Hanks</h1>
     <div class="area-usuario">
       <span id="badge-role" class="badge-role" hidden></span>
+      <a href="planos.html" class="botao-secundario">Planos</a>
       <a href="tier-list.html" class="botao-secundario">Tier List</a>
       <button id="btn-logout" class="botao-secundario">Sair</button>
     </div>
@@ -38,12 +39,23 @@
             <input type="text" class="input-comentario" placeholder="Escreva um comentário..." required>
             <button type="submit">Comentar</button>
           </form>
-          <p class="aviso-nivel" hidden></p>
           <ul class="lista-comentarios"></ul>
         </div>
       </div>
     </article>
   </template>
+
+  <!-- modal de upgrade, reaproveitado por todas as ações bloqueadas por papel -->
+  <div id="modal-upgrade" class="modal-overlay" hidden>
+    <div class="modal-caixa">
+      <h2 id="modal-titulo">Recurso bloqueado</h2>
+      <p id="modal-texto">Essa ação exige um plano superior.</p>
+      <div class="modal-botoes">
+        <button id="modal-btn-cancelar" class="botao-modal-cancelar">Agora não</button>
+        <button id="modal-btn-assinar">Assinar plano</button>
+      </div>
+    </div>
+  </div>
 
   <script src="js/catalogo.js"></script>
 </body>

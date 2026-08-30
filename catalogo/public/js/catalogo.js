@@ -4,6 +4,12 @@ const modeloCard = document.getElementById('modelo-card')
 const btnLogout = document.getElementById('btn-logout')
 const badgeRole = document.getElementById('badge-role')
 
+const modalUpgrade = document.getElementById('modal-upgrade')
+const modalTitulo = document.getElementById('modal-titulo')
+const modalTexto = document.getElementById('modal-texto')
+const modalBtnCancelar = document.getElementById('modal-btn-cancelar')
+const modalBtnAssinar = document.getElementById('modal-btn-assinar')
+
 const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
 
 let idsFavoritados = new Set()
@@ -18,6 +24,26 @@ function nivelDe(role) {
 function nivelAoMenos(roleMinimo) {
   return nivelDe(meuRole) >= nivelDe(roleMinimo)
 }
+
+// ---------- modal de upgrade ----------
+function abrirModalUpgrade(roleNecessario) {
+  modalTitulo.textContent = `Recurso do plano "${roleNecessario}"`
+  modalTexto.textContent = `Essa ação exige o plano "${roleNecessario}" ou superior. Assine para desbloquear.`
+  modalUpgrade.hidden = false
+}
+
+function fecharModalUpgrade() {
+  modalUpgrade.hidden = true
+}
+
+modalBtnCancelar.addEventListener('click', fecharModalUpgrade)
+modalUpgrade.addEventListener('click', (evento) => {
+  if (evento.target === modalUpgrade) fecharModalUpgrade()
+})
+modalBtnAssinar.addEventListener('click', () => {
+  // lógica de pagamento entra aqui futuramente -- por enquanto, não faz nada
+  fecharModalUpgrade()
+})
 
 function mostrarStatus(texto) {
   mensagemStatus.textContent = texto
@@ -93,40 +119,40 @@ function renderizarFilmes(filmes) {
     const contagemEl = card.querySelector('.contagem-favoritos')
     contagemEl.textContent = `${contagemFavoritos[filme.tmdb_movie_id] || 0} favoritos`
 
-    if (nivelAoMenos('fan')) {
-      atualizarBotaoFavorito(botaoFavoritar, idsFavoritados.has(filme.tmdb_movie_id))
-      botaoFavoritar.addEventListener('click', () => {
+    // botão sempre visível -- ação real se tiver nível, modal de upgrade se não tiver
+    atualizarBotaoFavorito(botaoFavoritar, idsFavoritados.has(filme.tmdb_movie_id))
+    botaoFavoritar.addEventListener('click', () => {
+      if (nivelAoMenos('fan')) {
         alternarFavorito(filme, botaoFavoritar, contagemEl)
-      })
-    } else {
-      // espectador só vê a contagem, não favorita
-      botaoFavoritar.remove()
-    }
+      } else {
+        abrirModalUpgrade('fan')
+      }
+    })
 
     const formComentario = card.querySelector('.form-comentario')
     const inputComentario = card.querySelector('.input-comentario')
     const listaComentarios = card.querySelector('.lista-comentarios')
-    const avisoNivel = card.querySelector('.aviso-nivel')
     const botaoEnviarComentario = formComentario.querySelector('button')
 
+    // sempre carrega/tenta mostrar comentários -- backend decide o que devolve
     if (nivelAoMenos('fan')) {
       carregarComentarios(filme.tmdb_movie_id, listaComentarios)
-
-      formComentario.addEventListener('submit', async (evento) => {
-        evento.preventDefault()
-        const texto = inputComentario.value.trim()
-        if (!texto) return
-
-        await enviarComentario(filme.tmdb_movie_id, texto, botaoEnviarComentario)
-        inputComentario.value = ''
-        carregarComentarios(filme.tmdb_movie_id, listaComentarios)
-      })
-    } else {
-      // espectador não comenta nem vê comentários
-      formComentario.remove()
-      avisoNivel.textContent = 'Vire fã para comentar e ver comentários.'
-      avisoNivel.hidden = false
     }
+
+    formComentario.addEventListener('submit', async (evento) => {
+      evento.preventDefault()
+      const texto = inputComentario.value.trim()
+      if (!texto) return
+
+      if (!nivelAoMenos('fan')) {
+        abrirModalUpgrade('fan')
+        return
+      }
+
+      await enviarComentario(filme.tmdb_movie_id, texto, botaoEnviarComentario)
+      inputComentario.value = ''
+      carregarComentarios(filme.tmdb_movie_id, listaComentarios)
+    })
 
     listaFilmes.appendChild(card)
   })
@@ -175,7 +201,7 @@ async function alternarFavorito(filme, botao, contagemEl) {
 async function carregarComentarios(tmdbMovieId, listaComentariosEl) {
   try {
     const resposta = await fetch(`/api/comentarios/${tmdbMovieId}`)
-    if (!resposta.ok) return // usuário sem nível suficiente, silencioso
+    if (!resposta.ok) return
     const comentarios = await resposta.json()
 
     listaComentariosEl.innerHTML = ''
@@ -187,23 +213,26 @@ async function carregarComentarios(tmdbMovieId, listaComentariosEl) {
       item.appendChild(textoSpan)
 
       const souDono = c.usuario_id === meuUsuarioId
-      const souModerador = nivelAoMenos('stalker')
 
-      if (souDono || souModerador) {
-        const botaoApagar = document.createElement('button')
-        botaoApagar.textContent = '🗑'
-        botaoApagar.className = 'botao-apagar-comentario'
-        botaoApagar.addEventListener('click', async () => {
+      // ícone de apagar sempre visível pra quem já vê comentários (fan+);
+      // ação real se for dono ou stalker, modal de upgrade caso contrário
+      const botaoApagar = document.createElement('button')
+      botaoApagar.textContent = '🗑'
+      botaoApagar.className = 'botao-apagar-comentario'
+      botaoApagar.addEventListener('click', async () => {
+        if (souDono) {
           botaoApagar.disabled = true
-          if (souDono) {
-            await apagarComentarioProprio(c.id)
-          } else {
-            await apagarComentarioModeracao(c.id)
-          }
+          await apagarComentarioProprio(c.id)
           carregarComentarios(tmdbMovieId, listaComentariosEl)
-        })
-        item.appendChild(botaoApagar)
-      }
+        } else if (nivelAoMenos('stalker')) {
+          botaoApagar.disabled = true
+          await apagarComentarioModeracao(c.id)
+          carregarComentarios(tmdbMovieId, listaComentariosEl)
+        } else {
+          abrirModalUpgrade('stalker')
+        }
+      })
+      item.appendChild(botaoApagar)
 
       listaComentariosEl.appendChild(item)
     })
