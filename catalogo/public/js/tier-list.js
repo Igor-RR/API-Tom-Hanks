@@ -2,7 +2,31 @@ const listaStalkers = document.getElementById('lista-stalkers')
 const mensagemStatus = document.getElementById('mensagem-status')
 const modeloCard = document.getElementById('modelo-card-stalker')
 
+const modalUpgrade = document.getElementById('modal-upgrade')
+const modalTitulo = document.getElementById('modal-titulo')
+const modalTexto = document.getElementById('modal-texto')
+const modalBtnCancelar = document.getElementById('modal-btn-cancelar')
+const modalBtnAssinar = document.getElementById('modal-btn-assinar')
+
 const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
+
+function abrirModalUpgrade(roleNecessario) {
+  modalTitulo.textContent = `Recurso do plano "${roleNecessario}"`
+  modalTexto.textContent = `Essa ação exige o plano "${roleNecessario}" ou superior. Assine para desbloquear.`
+  modalUpgrade.hidden = false
+}
+
+function fecharModalUpgrade() {
+  modalUpgrade.hidden = true
+}
+
+modalBtnCancelar.addEventListener('click', fecharModalUpgrade)
+modalUpgrade.addEventListener('click', (evento) => {
+  if (evento.target === modalUpgrade) fecharModalUpgrade()
+})
+modalBtnAssinar.addEventListener('click', () => {
+  fecharModalUpgrade()
+})
 
 function mostrarStatus(texto) {
   mensagemStatus.textContent = texto
@@ -25,14 +49,13 @@ async function iniciar() {
 
     const me = await respostaMe.json()
     const stalkers = await respostaStalkers.json()
-
     const souStalker = HIERARQUIA.indexOf(me.role) >= HIERARQUIA.indexOf('stalker')
     const euJaTenhoLista = stalkers.some(s => String(s.usuario_id) === String(me.usuario_id))
 
+    mensagemStatus.hidden = true
     listaStalkers.innerHTML = ''
 
-    // se sou stalker e ainda não apareço na lista (0 filmes classificados),
-    // adiciona um card pra eu poder começar minha própria tier list
+    // stalker sem lista ainda -- card real pra começar
     if (souStalker && !euJaTenhoLista) {
       const card = modeloCard.content.cloneNode(true)
       const link = card.querySelector('.card-stalker')
@@ -42,12 +65,20 @@ async function iniciar() {
       listaStalkers.appendChild(card)
     }
 
-    if (stalkers.length === 0 && !souStalker) {
-      mostrarStatus('Nenhum stalker criou uma tier list ainda.')
-      return
+    // não é stalker -- card sempre visível, mas clique abre modal de upgrade
+    if (!souStalker) {
+      const card = modeloCard.content.cloneNode(true)
+      const link = card.querySelector('.card-stalker')
+      link.removeAttribute('href')
+      link.style.cursor = 'pointer'
+      card.querySelector('.nome-stalker').textContent = 'Criar minha própria tier list'
+      card.querySelector('.contagem-stalker').textContent = 'Recurso do plano stalker'
+      link.addEventListener('click', (evento) => {
+        evento.preventDefault()
+        abrirModalUpgrade('stalker')
+      })
+      listaStalkers.appendChild(card)
     }
-
-    mensagemStatus.hidden = true
 
     stalkers.forEach(s => {
       const card = modeloCard.content.cloneNode(true)
