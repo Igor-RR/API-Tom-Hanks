@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tier List — Tom Hanks</title>
+  <link rel="stylesheet" href="css/index.css">
+</head>
+<body class="pagina-catalogo">
+  <header class="topo">
+    <h1>Tier List dos filmes</h1>
+    <div class="area-usuario">
+      <a href="catalogo.html" class="botao-secundario">Voltar ao catálogo</a>
+    </div>
+  </header>
+
+  <main>
+    <p id="mensagem-status" class="status" hidden></p>
+    <div id="lista-tiers" class="lista-tiers"></div>
+  </main>
+
+  <template id="modelo-linha-tier">
+    <div class="linha-tier">
+      <span class="titulo-filme-tier"></span>
+      <select class="select-tier" hidden>
+        <option value="S">S</option>
+        <option value="A">A</option>
+        <option value="B">B</option>
+        <option value="C">C</option>
+        <option value="D">D</option>
+      </select>
+      <span class="badge-tier"></span>
+      <button class="botao-salvar-tier" hidden>Salvar</button>
+    </div>
+  </template>
+
+  <script src="js/tier-list.js"></script>
+</body>
+</html>
