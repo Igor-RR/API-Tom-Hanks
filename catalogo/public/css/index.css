@@ -379,3 +379,120 @@ button:hover {
 .badge-tier.tier-B { background: #a8d0e6; }
 .badge-tier.tier-C { background: #e6b8a8; }
 .badge-tier.tier-D { background: #d9a8a8; }
+
+.grade-stalkers {
+  max-width: 700px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card-stalker {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f4f7f3;
+  border: 1px solid #e3ece2;
+  border-radius: 8px;
+  padding: 14px 18px;
+  text-decoration: none;
+  color: #2b2f2b;
+  transition: border-color 0.2s ease;
+}
+
+.card-stalker:hover {
+  border-color: #8fbc8f;
+}
+
+.nome-stalker {
+  font-weight: 600;
+}
+
+.contagem-stalker {
+  font-size: 0.8rem;
+  color: #6b7a6b;
+}
+
+.fileira-tier {
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 140px;
+}
+
+.rotulo-tier {
+  width: 60px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #1f2e1f;
+}
+
+.fileira-S .rotulo-tier { background: #f4c542; }
+.fileira-A .rotulo-tier { background: #8fbc8f; }
+.fileira-B .rotulo-tier { background: #a8d0e6; }
+.fileira-C .rotulo-tier { background: #e6b8a8; }
+.fileira-D .rotulo-tier { background: #d9a8a8; }
+
+.posters-tier {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  overflow-x: auto;
+  background: #f4f7f3;
+}
+
+.poster-item {
+  flex-shrink: 0;
+  width: 100px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.poster-img {
+  width: 100px;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #e3ece2;
+}
+
+.poster-titulo {
+  font-size: 0.7rem;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.poster-acoes {
+  display: flex;
+  gap: 4px;
+}
+
+.select-mudar-tier {
+  flex: 1;
+  padding: 2px;
+  font-size: 0.7rem;
+}
+
+.botao-remover-tier {
+  padding: 2px 6px;
+  margin-top: 0;
+  font-size: 0.7rem;
+  background: #c0524a;
+  color: white;
+}
+
+.grade-nao-classificados {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}

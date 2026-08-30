@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tier List — Tom Hanks</title>
+  <link rel="stylesheet" href="css/index.css">
+</head>
+<body class="pagina-catalogo">
+  <header class="topo">
+    <h1 id="titulo-pagina">Tier List</h1>
+    <div class="area-usuario">
+      <a href="tier-list.html" class="botao-secundario">Voltar</a>
+    </div>
+  </header>
+
+  <main>
+    <p id="mensagem-status" class="status" hidden></p>
+    <div id="tiers-container"></div>
+
+    <div id="secao-nao-classificados" hidden>
+      <h2>Não classificados</h2>
+      <div id="lista-nao-classificados" class="grade-nao-classificados"></div>
+    </div>
+  </main>
+
+  <template id="modelo-fileira-tier">
+    <div class="fileira-tier">
+      <div class="rotulo-tier"></div>
+      <div class="posters-tier"></div>
+    </div>
+  </template>
+
+  <template id="modelo-poster-tier">
+    <div class="poster-item">
+      <img class="poster-img" alt="">
+      <span class="poster-titulo"></span>
+      <div class="poster-acoes" hidden>
+        <select class="select-mudar-tier">
+          <option value="S">S</option>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+        </select>
+        <button class="botao-remover-tier">✕</button>
+      </div>
+    </div>
+  </template>
+
+  <script src="js/tier-list-detalhe.js"></script>
+</body>
+</html>
