@@ -4,7 +4,7 @@ const PLANOS = [
   {
     role: 'espectador',
     nome: 'Espectador',
-    descricao: 'Para quem só quer navegar.',
+    descricao: 'Para que gosta de assitir um filminho de tarde 🍿​',
     recursos: [
       'Ver a lista de filmes',
       'Ver quantos favoritaram cada filme',
@@ -15,7 +15,7 @@ const PLANOS = [
   {
     role: 'fan',
     nome: 'Fan',
-    descricao: 'Para quem quer participar.',
+    descricao: 'Para que se familiariza com o tom hanks',
     recursos: [
       'Tudo do plano Espectador',
       'Favoritar filmes',
@@ -27,7 +27,7 @@ const PLANOS = [
   {
     role: 'cinefilo',
     nome: 'Cinéfilo',
-    descricao: 'Para quem quer ver a comunidade toda.',
+    descricao: 'Para que realmente é fã de um bom filme e do Tom Hanks',
     recursos: [
       'Tudo do plano Fan',
       'Ver os comentários de todos os usuários'
@@ -37,7 +37,7 @@ const PLANOS = [
   {
     role: 'stalker',
     nome: 'Stalker',
-    descricao: 'Para quem quer o controle total.',
+    descricao: 'Para os stalkes de plantão ​🥸🕵️​​',
     recursos: [
       'Tudo do plano Cinéfilo',
       'Apagar qualquer comentário (moderação)',
