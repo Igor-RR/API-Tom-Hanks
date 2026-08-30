@@ -1,27 +1,17 @@
 const express = require('express')
 const bcrypt = require('bcrypt')
 const crypto = require('crypto')
+const jwt = require('jsonwebtoken')
 const nodemailer = require('nodemailer')
-const db = require('./db')
 const rateLimit = require('express-rate-limit')
+const db = require('./db')
 
 const router = express.Router()
 
-// Objeto para definir limite de tentativas. Ultrapassados, o usuário deve espara 15 min
-const limitador = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  message: { mensagem: 'Muitas tentativas. Tente novamente mais tarde.' },
-  standardHeaders: true,
-  legacyHeaders: false
-})
-
-// validação do e-mail -- feita sempre no back, nunca confiando só no <input type="email">
 function emailValido(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
-// transportador de e-mail (SMPT em dev)
 const transportador = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: process.env.SMTP_PORT,
@@ -29,6 +19,14 @@ const transportador = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
   }
+})
+
+const limitadorSensivel = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { mensagem: 'Muitas tentativas. Tente novamente mais tarde.' },
+  standardHeaders: true,
+  legacyHeaders: false
 })
 
 // ---------- CADASTRO ----------
@@ -46,12 +44,12 @@ router.post('/cadastro', async (req, res) => {
   }
 
   try {
-    const senhaHash = await bcrypt.hash(senha, 10) //Encriptografa a senha antes de salvar no banco
+    const senhaHash = await bcrypt.hash(senha, 10)
 
-    // todo usuário novo nasce com o papel padrão "usuario"
+    // todo usuário novo nasce no papel mais baixo da hierarquia
     await db.query(
       'INSERT INTO usuarios (nome, email, senha_hash, role) VALUES (?, ?, ?, ?)',
-      [nome, email, senhaHash, 'usuario']
+      [nome, email, senhaHash, 'espectador']
     )
 
     res.status(201).json({ mensagem: 'Conta criada com sucesso.' })
@@ -66,9 +64,8 @@ router.post('/cadastro', async (req, res) => {
 })
 
 // ---------- LOGIN ----------
-// não cria sessão aqui -- só valida e devolve os dados que o catálogo precisa
-// pra decidir se abre sessão e com qual papel
-router.post('/login',limitador, async (req, res) => {
+// não cria sessão -- assina um JWT com os dados que o catálogo precisa
+router.post('/login', limitadorSensivel, async (req, res) => {
   const { email, senha } = req.body
 
   if (!email || !senha) {
@@ -88,13 +85,13 @@ router.post('/login',limitador, async (req, res) => {
       return res.status(401).json({ mensagem: 'E-mail ou senha inválidos.' })
     }
 
-    // devolve só o que o catálogo precisa pra montar a sessão -- nunca o hash da senha
-    res.json({
-      id: usuario.id,
-      nome: usuario.nome,
-      email: usuario.email,
-      role: usuario.role
-    })
+    const token = jwt.sign(
+      { usuario_id: usuario.id, role: usuario.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    )
+
+    res.json({ token })
 
   } catch (err) {
     console.error(err)
@@ -103,7 +100,7 @@ router.post('/login',limitador, async (req, res) => {
 })
 
 // ---------- ESQUECI MINHA SENHA ----------
-router.post('/esqueci-senha',limitador, async (req, res) => {
+router.post('/esqueci-senha', limitadorSensivel, async (req, res) => {
   const { email } = req.body
 
   if (!email || !emailValido(email)) {
@@ -114,26 +111,23 @@ router.post('/esqueci-senha',limitador, async (req, res) => {
     const [linhas] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email])
     const usuario = linhas[0]
 
-    // mesmo se o e-mail não existir, respondemos como se tivesse dado certo --
-    // isso evita que alguém use essa rota pra descobrir quais e-mails estão cadastrados
     if (!usuario) {
       return res.json({ mensagem: 'Se esse e-mail existir, um link de redefinição foi enviado.' })
     }
 
     const token = crypto.randomBytes(32).toString('hex')
     const criadoEm = new Date()
-    const expiraEm = new Date(criadoEm.getTime() + 30 * 60 * 1000) // +30 minutos
+    const expiraEm = new Date(criadoEm.getTime() + 30 * 60 * 1000)
 
     await db.query(
       'INSERT INTO reset_tokens (token, usuario_id, criado_em, expira_em, usado) VALUES (?, ?, ?, ?, ?)',
       [token, usuario.id, criadoEm, expiraEm, false]
     )
 
-    // o link aponta pro CATÁLOGO (único ponto público), não pro auth-service
     const link = `${process.env.APP_URL}/redefinir-senha.html?token=${token}`
 
     await transportador.sendMail({
-      from: '"Catálogo Tom Hanks" <apitomhanks@gmail.com>',
+      from: '"Catálogo Tom Hanks" <no-reply@catalogo.com>',
       to: usuario.email,
       subject: 'Redefinição de senha',
       html: `<p>Clique no link abaixo para redefinir sua senha. Ele expira em 30 minutos:</p>
@@ -163,7 +157,6 @@ router.post('/redefinir-senha', async (req, res) => {
     const [linhas] = await db.query('SELECT * FROM reset_tokens WHERE token = ?', [token])
     const registroToken = linhas[0]
 
-    // as três checagens exigidas pela spec, nessa ordem
     if (!registroToken) {
       return res.status(400).json({ mensagem: 'Link inválido.' })
     }

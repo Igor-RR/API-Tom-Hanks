@@ -1,44 +1,43 @@
-require('dotenv').config() // Lê o arquivo com as variáveis de ambiente
+require('dotenv').config()
 
 const express = require('express')
-const session = require('express-session')
-const path = require('path') // Possibiliat montar caminhos de arquivo e montar o fronted de outra pasta
-const routes = require('./routes.js') //Importa as rotas
+const cookieParser = require('cookie-parser')
+const path = require('path')
+const routes = require('./routes.js')
 
 const app = express()
 
-const PORTA = process.env.PORT || 3000
+const PORTA = process.env.PORT_CATALOGO || 3000
 
-app.use(express.json()) //Converte todo arquivo enviado em cada requisição (devidamento marcada com o COntentType) em Json, acessível via req.body
+app.use(express.json())
+app.use(cookieParser())
 
-app.use(session({
-  secret: process.env.SESSION_SECRET, // acessa a chave secreta em .env para marcar a sessão
-  resave: false, // evita regravar sessão sem mudança
-  saveUninitialized: false // não permite criar sessão para usuário anônimo
-}))
-
-// Função para verificar se exite usuário id na sessão, caso contrário enviando para página de login
 function exigirLogin(req, res, next) {
-  if (!req.session.usuario_id) {
+  const jwt = require('jsonwebtoken')
+  const token = req.cookies.token
+  if (!token) {
     return res.redirect('/login.html')
   }
-  next()
-} 
+  try {
+    jwt.verify(token, process.env.JWT_SECRET)
+    next()
+  } catch (err) {
+    return res.redirect('/login.html')
+  }
+}
 
-// Se tiver id, vai para catalogo.html, se não, voulta a tela de login
 app.get('/', (req, res) => {
-  res.redirect(req.session.usuario_id ? '/catalogo.html' : '/login.html')
+  res.redirect(req.cookies.token ? '/catalogo.html' : '/login.html')
 })
 
-// Aplicamos a função de verificação
 app.get('/catalogo.html', exigirLogin, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'catalogo.html'))
 })
 
-app.use(express.static(path.join(__dirname, 'public'))) // Serve os arquivos estáticos em public
+app.use(express.static(path.join(__dirname, 'public')))
 
-app.use('/api', routes) // Consome as rotas em routes
+app.use('/api', routes)
 
 app.listen(PORTA, () => {
-  console.log(`Servidor rodando na porta ${PORTA}`)
+  console.log(`Catálogo rodando na porta ${PORTA}`)
 })
