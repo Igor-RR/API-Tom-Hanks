@@ -14,6 +14,7 @@ form.addEventListener('submit', async (evento) => {
     const resposta = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify(dados)
     })
 
@@ -24,7 +25,6 @@ form.addEventListener('submit', async (evento) => {
       return
     }
 
-    // login deu certo -> vai pro catálogo
     window.location.href = '/catalogo.html'
 
   } catch (err) {
