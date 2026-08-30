@@ -1,29 +1,43 @@
 const express = require('express')
+const jwt = require('jsonwebtoken')
 const rateLimit = require('express-rate-limit')
 const db = require('./db')
 
 const router = express.Router()
 
-const AUTH_URL = process.env.AUTH_SERVICE_URL // ex: http://auth-service:4000
+const AUTH_URL = process.env.AUTH_SERVICE_URL
+const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
 
+function nivelDe(role) {
+  return HIERARQUIA.indexOf(role)
+}
+
+// lê e valida o JWT do cookie, popula req.usuario
 function exigirLogin(req, res, next) {
-  if (!req.session.usuario_id) {
+  const token = req.cookies.token
+  if (!token) {
     return res.status(401).json({ mensagem: 'Você precisa estar logado.' })
   }
-  next()
-}
-
-function exigirAdmin(req, res, next) {
-  if (req.session.role !== 'admin') {
-    return res.status(403).json({ mensagem: 'Acesso restrito a administradores.' })
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET)
+    req.usuario = payload // { usuario_id, role }
+    next()
+  } catch (err) {
+    return res.status(401).json({ mensagem: 'Sessão inválida ou expirada.' })
   }
-  next()
 }
 
-// limite pra ações de escrita (favoritar, comentar, apagar) -- evita sobrecarregar o banco
-// com cliques repetidos ou chamadas automatizadas em loop
+function exigirNivel(roleMinimo) {
+  return (req, res, next) => {
+    if (nivelDe(req.usuario.role) < nivelDe(roleMinimo)) {
+      return res.status(403).json({ mensagem: 'Seu papel não tem permissão para essa ação.' })
+    }
+    next()
+  }
+}
+
 const limitadorEscrita = rateLimit({
-  windowMs: 60 * 1000, // 1 minuto
+  windowMs: 60 * 1000,
   max: 20,
   message: { mensagem: 'Muitas requisições. Aguarde um momento.' },
   standardHeaders: true,
@@ -33,10 +47,7 @@ const limitadorEscrita = rateLimit({
 // ---------- USUÁRIO LOGADO ----------
 
 router.get('/me', exigirLogin, (req, res) => {
-  res.json({
-    usuario_id: req.session.usuario_id,
-    role: req.session.role
-  })
+  res.json({ usuario_id: req.usuario.usuario_id, role: req.usuario.role })
 })
 
 // ---------- PROXY PRO AUTH-SERVICE ----------
@@ -50,7 +61,6 @@ router.post('/auth/cadastro', async (req, res) => {
     })
     const dados = await resposta.json()
     res.status(resposta.status).json(dados)
-
   } catch (err) {
     console.error(err)
     res.status(502).json({ mensagem: 'Serviço de autenticação indisponível.' })
@@ -70,8 +80,13 @@ router.post('/auth/login', async (req, res) => {
       return res.status(resposta.status).json(dados)
     }
 
-    req.session.usuario_id = dados.id
-    req.session.role = dados.role
+    // seta o JWT recebido do auth-service como cookie httpOnly
+    res.cookie('token', dados.token, {
+      httpOnly: true,
+      secure: true,       // exige HTTPS -- true em produção; se testar local sem HTTPS, ajuste para false
+      sameSite: 'strict',
+      maxAge: 2 * 60 * 60 * 1000 // 2h, mesmo tempo do expiresIn do JWT
+    })
 
     res.json({ mensagem: 'Login realizado com sucesso.' })
 
@@ -82,9 +97,8 @@ router.post('/auth/login', async (req, res) => {
 })
 
 router.post('/auth/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.json({ mensagem: 'Logout realizado.' })
-  })
+  res.clearCookie('token')
+  res.json({ mensagem: 'Logout realizado.' })
 })
 
 router.post('/auth/esqueci-senha', async (req, res) => {
@@ -96,7 +110,6 @@ router.post('/auth/esqueci-senha', async (req, res) => {
     })
     const dados = await resposta.json()
     res.status(resposta.status).json(dados)
-
   } catch (err) {
     console.error(err)
     res.status(502).json({ mensagem: 'Serviço de autenticação indisponível.' })
@@ -112,7 +125,6 @@ router.post('/auth/redefinir-senha', async (req, res) => {
     })
     const dados = await resposta.json()
     res.status(resposta.status).json(dados)
-
   } catch (err) {
     console.error(err)
     res.status(502).json({ mensagem: 'Serviço de autenticação indisponível.' })
@@ -146,7 +158,6 @@ router.get('/filmes', exigirLogin, async (req, res) => {
       }))
 
     res.json(filmes)
-
   } catch (err) {
     console.error(err)
     res.status(500).json({ mensagem: 'Erro ao buscar filmes na TMDB.' })
@@ -155,11 +166,24 @@ router.get('/filmes', exigirLogin, async (req, res) => {
 
 // ---------- FAVORITOS ----------
 
-router.get('/favoritos', exigirLogin, async (req, res) => {
+// contagem pública -- espectador+
+router.get('/favoritos/contagem', exigirLogin, async (req, res) => {
+  try {
+    const [linhas] = await db.query(
+      'SELECT tmdb_movie_id, COUNT(*) AS total FROM favoritos GROUP BY tmdb_movie_id'
+    )
+    res.json(linhas)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ mensagem: 'Erro ao buscar contagem de favoritos.' })
+  }
+})
+
+router.get('/favoritos', exigirLogin, exigirNivel('fan'), async (req, res) => {
   try {
     const [favoritos] = await db.query(
       'SELECT * FROM favoritos WHERE usuario_id = ?',
-      [req.session.usuario_id]
+      [req.usuario.usuario_id]
     )
     res.json(favoritos)
   } catch (err) {
@@ -168,7 +192,7 @@ router.get('/favoritos', exigirLogin, async (req, res) => {
   }
 })
 
-router.post('/favoritos', exigirLogin, limitadorEscrita, async (req, res) => {
+router.post('/favoritos', exigirLogin, exigirNivel('fan'), limitadorEscrita, async (req, res) => {
   const { tmdb_movie_id, titulo, poster_path } = req.body
 
   if (!tmdb_movie_id || !titulo) {
@@ -178,10 +202,9 @@ router.post('/favoritos', exigirLogin, limitadorEscrita, async (req, res) => {
   try {
     await db.query(
       'INSERT INTO favoritos (usuario_id, tmdb_movie_id, titulo, poster_path) VALUES (?, ?, ?, ?)',
-      [req.session.usuario_id, tmdb_movie_id, titulo, poster_path]
+      [req.usuario.usuario_id, tmdb_movie_id, titulo, poster_path]
     )
     res.status(201).json({ mensagem: 'Favoritado com sucesso.' })
-
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ mensagem: 'Esse filme já está nos seus favoritos.' })
@@ -191,11 +214,11 @@ router.post('/favoritos', exigirLogin, limitadorEscrita, async (req, res) => {
   }
 })
 
-router.delete('/favoritos/:tmdb_movie_id', exigirLogin, limitadorEscrita, async (req, res) => {
+router.delete('/favoritos/:tmdb_movie_id', exigirLogin, exigirNivel('fan'), limitadorEscrita, async (req, res) => {
   try {
     await db.query(
       'DELETE FROM favoritos WHERE usuario_id = ? AND tmdb_movie_id = ?',
-      [req.session.usuario_id, req.params.tmdb_movie_id]
+      [req.usuario.usuario_id, req.params.tmdb_movie_id]
     )
     res.json({ mensagem: 'Removido dos favoritos.' })
   } catch (err) {
@@ -206,11 +229,11 @@ router.delete('/favoritos/:tmdb_movie_id', exigirLogin, limitadorEscrita, async 
 
 // ---------- COMENTÁRIOS ----------
 
-router.get('/comentarios/:tmdb_movie_id', exigirLogin, async (req, res) => {
+router.get('/comentarios/:tmdb_movie_id', exigirLogin, exigirNivel('fan'), async (req, res) => {
   try {
     let comentarios
 
-    if (req.session.role === 'admin') {
+    if (nivelDe(req.usuario.role) >= nivelDe('cinefilo')) {
       const [linhas] = await db.query(
         'SELECT * FROM comentarios WHERE tmdb_movie_id = ?',
         [req.params.tmdb_movie_id]
@@ -219,7 +242,7 @@ router.get('/comentarios/:tmdb_movie_id', exigirLogin, async (req, res) => {
     } else {
       const [linhas] = await db.query(
         'SELECT * FROM comentarios WHERE usuario_id = ? AND tmdb_movie_id = ?',
-        [req.session.usuario_id, req.params.tmdb_movie_id]
+        [req.usuario.usuario_id, req.params.tmdb_movie_id]
       )
       comentarios = linhas
     }
@@ -231,7 +254,7 @@ router.get('/comentarios/:tmdb_movie_id', exigirLogin, async (req, res) => {
   }
 })
 
-router.post('/comentarios', exigirLogin, limitadorEscrita, async (req, res) => {
+router.post('/comentarios', exigirLogin, exigirNivel('fan'), limitadorEscrita, async (req, res) => {
   const { tmdb_movie_id, texto } = req.body
 
   if (!tmdb_movie_id || !texto) {
@@ -241,7 +264,7 @@ router.post('/comentarios', exigirLogin, limitadorEscrita, async (req, res) => {
   try {
     await db.query(
       'INSERT INTO comentarios (usuario_id, tmdb_movie_id, texto) VALUES (?, ?, ?)',
-      [req.session.usuario_id, tmdb_movie_id, texto]
+      [req.usuario.usuario_id, tmdb_movie_id, texto]
     )
     res.status(201).json({ mensagem: 'Comentário adicionado.' })
   } catch (err) {
@@ -250,13 +273,60 @@ router.post('/comentarios', exigirLogin, limitadorEscrita, async (req, res) => {
   }
 })
 
-router.delete('/comentarios/:id', exigirLogin, exigirAdmin, limitadorEscrita, async (req, res) => {
+router.delete('/comentarios/proprio/:id', exigirLogin, exigirNivel('fan'), limitadorEscrita, async (req, res) => {
+  try {
+    const [resultado] = await db.query(
+      'DELETE FROM comentarios WHERE id = ? AND usuario_id = ?',
+      [req.params.id, req.usuario.usuario_id]
+    )
+    if (resultado.affectedRows === 0) {
+      return res.status(404).json({ mensagem: 'Comentário não encontrado ou não pertence a você.' })
+    }
+    res.json({ mensagem: 'Comentário removido.' })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ mensagem: 'Erro ao remover comentário.' })
+  }
+})
+
+router.delete('/comentarios/:id', exigirLogin, exigirNivel('stalker'), limitadorEscrita, async (req, res) => {
   try {
     await db.query('DELETE FROM comentarios WHERE id = ?', [req.params.id])
     res.json({ mensagem: 'Comentário removido pela moderação.' })
   } catch (err) {
     console.error(err)
     res.status(500).json({ mensagem: 'Erro ao remover comentário.' })
+  }
+})
+
+// ---------- TIER LIST ----------
+
+router.get('/tier-list', exigirLogin, async (req, res) => {
+  try {
+    const [linhas] = await db.query('SELECT * FROM tier_list')
+    res.json(linhas)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ mensagem: 'Erro ao buscar tier list.' })
+  }
+})
+
+router.put('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), limitadorEscrita, async (req, res) => {
+  const { titulo, tier } = req.body
+  if (!titulo || !tier) {
+    return res.status(400).json({ mensagem: 'Informe título e tier.' })
+  }
+  try {
+    await db.query(
+      `INSERT INTO tier_list (tmdb_movie_id, titulo, tier, atualizado_por)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE titulo = ?, tier = ?, atualizado_por = ?`,
+      [req.params.tmdb_movie_id, titulo, tier, req.usuario.usuario_id, titulo, tier, req.usuario.usuario_id]
+    )
+    res.json({ mensagem: 'Tier list atualizada.' })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ mensagem: 'Erro ao atualizar tier list.' })
   }
 })
 
