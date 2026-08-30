@@ -86,9 +86,9 @@ router.post('/auth/login', async (req, res) => {
     // seta o JWT recebido do auth-service como cookie httpOnly
     res.cookie('token', dados.token, {
       httpOnly: true,
-      secure: true,       // exige HTTPS, false para Testes locais, true para produção
+      secure: true,       // exige HTTPS
       sameSite: 'strict',
-      maxAge: 1 * 60 * 60 * 1000 // 1 hora
+      maxAge: 1*15*60*1000 //Token expira em 15min
     })
 
     res.json({ mensagem: 'Login realizado com sucesso.' })
