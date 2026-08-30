@@ -86,7 +86,7 @@ router.post('/login', limitadorSensivel, async (req, res) => {
     }
 
     const token = jwt.sign(
-      { usuario_id: usuario.id, role: usuario.role },
+      { usuario_id: usuario.id,nome: usuario.nome, role: usuario.role },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     )
