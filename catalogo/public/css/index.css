@@ -316,3 +316,66 @@ button:hover {
 .botao-apagar-comentario:hover {
   opacity: 0.7;
 }
+
+.badge-role {
+  background: #e3ece2;
+  color: #2b2f2b;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  text-transform: capitalize;
+}
+
+.linha-acoes {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.contagem-favoritos {
+  font-size: 0.75rem;
+  color: #6b7a6b;
+}
+
+.aviso-nivel {
+  font-size: 0.8rem;
+  color: #6b7a6b;
+  font-style: italic;
+}
+
+.lista-tiers {
+  max-width: 700px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.linha-tier {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f4f7f3;
+  border: 1px solid #e3ece2;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.titulo-filme-tier {
+  flex: 1;
+}
+
+.badge-tier {
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #dfe8de;
+}
+
+.badge-tier.tier-S { background: #f4c542; }
+.badge-tier.tier-A { background: #8fbc8f; }
+.badge-tier.tier-B { background: #a8d0e6; }
+.badge-tier.tier-C { background: #e6b8a8; }
+.badge-tier.tier-D { background: #d9a8a8; }
