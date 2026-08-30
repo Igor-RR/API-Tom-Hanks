@@ -47,9 +47,12 @@ const limitadorEscrita = rateLimit({
 // ---------- USUÁRIO LOGADO ----------
 
 router.get('/me', exigirLogin, (req, res) => {
-  res.json({ usuario_id: req.usuario.usuario_id, role: req.usuario.role })
+  res.json({
+    usuario_id: req.usuario.usuario_id,
+    nome: req.usuario.nome,
+    role: req.usuario.role
+  })
 })
-
 // ---------- PROXY PRO AUTH-SERVICE ----------
 
 router.post('/auth/cadastro', async (req, res) => {
