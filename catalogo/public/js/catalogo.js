@@ -2,10 +2,22 @@ const listaFilmes = document.getElementById('lista-filmes')
 const mensagemStatus = document.getElementById('mensagem-status')
 const modeloCard = document.getElementById('modelo-card')
 const btnLogout = document.getElementById('btn-logout')
-const badgeAdmin = document.getElementById('badge-admin')
+const badgeRole = document.getElementById('badge-role')
+
+const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
 
 let idsFavoritados = new Set()
-let souAdmin = false
+let contagemFavoritos = {}
+let meuUsuarioId = null
+let meuRole = 'espectador'
+
+function nivelDe(role) {
+  return HIERARQUIA.indexOf(role)
+}
+
+function nivelAoMenos(roleMinimo) {
+  return nivelDe(meuRole) >= nivelDe(roleMinimo)
+}
 
 function mostrarStatus(texto) {
   mensagemStatus.textContent = texto
@@ -21,24 +33,34 @@ async function iniciar() {
   mostrarStatus('Carregando filmes...')
 
   try {
-    const [respostaFilmes, respostaFavoritos, respostaMe] = await Promise.all([
-      fetch('/api/filmes'),
-      fetch('/api/favoritos'),
-      fetch('/api/me')
-    ])
-
-    if (respostaFilmes.status === 401 || respostaFavoritos.status === 401) {
+    const respostaMe = await fetch('/api/me')
+    if (respostaMe.status === 401) {
       window.location.href = '/login.html'
       return
     }
+    const me = await respostaMe.json()
+    meuUsuarioId = me.usuario_id
+    meuRole = me.role
+
+    badgeRole.textContent = meuRole
+    badgeRole.hidden = false
+
+    const chamadas = [fetch('/api/filmes'), fetch('/api/favoritos/contagem')]
+    if (nivelAoMenos('fan')) {
+      chamadas.push(fetch('/api/favoritos'))
+    }
+
+    const respostas = await Promise.all(chamadas)
+    const [respostaFilmes, respostaContagem, respostaFavoritos] = respostas
 
     const filmes = await respostaFilmes.json()
-    const favoritos = await respostaFavoritos.json()
-    const me = await respostaMe.json()
+    const contagens = await respostaContagem.json()
+    contagemFavoritos = Object.fromEntries(contagens.map(c => [c.tmdb_movie_id, c.total]))
 
-    idsFavoritados = new Set(favoritos.map(f => f.tmdb_movie_id))
-    souAdmin = me.role === 'admin'
-    badgeAdmin.hidden = !souAdmin
+    if (respostaFavoritos) {
+      const favoritos = await respostaFavoritos.json()
+      idsFavoritados = new Set(favoritos.map(f => f.tmdb_movie_id))
+    }
 
     if (!respostaFilmes.ok) {
       mostrarStatus('Não foi possível carregar os filmes da TMDB.')
@@ -68,28 +90,43 @@ function renderizarFilmes(filmes) {
     card.querySelector('.sinopse').textContent = filme.sinopse || 'Sem sinopse disponível.'
 
     const botaoFavoritar = card.querySelector('.botao-favoritar')
-    atualizarBotaoFavorito(botaoFavoritar, idsFavoritados.has(filme.tmdb_movie_id))
+    const contagemEl = card.querySelector('.contagem-favoritos')
+    contagemEl.textContent = `${contagemFavoritos[filme.tmdb_movie_id] || 0} favoritos`
 
-    botaoFavoritar.addEventListener('click', () => {
-      alternarFavorito(filme, botaoFavoritar)
-    })
+    if (nivelAoMenos('fan')) {
+      atualizarBotaoFavorito(botaoFavoritar, idsFavoritados.has(filme.tmdb_movie_id))
+      botaoFavoritar.addEventListener('click', () => {
+        alternarFavorito(filme, botaoFavoritar, contagemEl)
+      })
+    } else {
+      // espectador só vê a contagem, não favorita
+      botaoFavoritar.remove()
+    }
 
     const formComentario = card.querySelector('.form-comentario')
     const inputComentario = card.querySelector('.input-comentario')
     const listaComentarios = card.querySelector('.lista-comentarios')
+    const avisoNivel = card.querySelector('.aviso-nivel')
     const botaoEnviarComentario = formComentario.querySelector('button')
 
-    carregarComentarios(filme.tmdb_movie_id, listaComentarios)
-
-    formComentario.addEventListener('submit', async (evento) => {
-      evento.preventDefault()
-      const texto = inputComentario.value.trim()
-      if (!texto) return
-
-      await enviarComentario(filme.tmdb_movie_id, texto, botaoEnviarComentario)
-      inputComentario.value = ''
+    if (nivelAoMenos('fan')) {
       carregarComentarios(filme.tmdb_movie_id, listaComentarios)
-    })
+
+      formComentario.addEventListener('submit', async (evento) => {
+        evento.preventDefault()
+        const texto = inputComentario.value.trim()
+        if (!texto) return
+
+        await enviarComentario(filme.tmdb_movie_id, texto, botaoEnviarComentario)
+        inputComentario.value = ''
+        carregarComentarios(filme.tmdb_movie_id, listaComentarios)
+      })
+    } else {
+      // espectador não comenta nem vê comentários
+      formComentario.remove()
+      avisoNivel.textContent = 'Vire fã para comentar e ver comentários.'
+      avisoNivel.hidden = false
+    }
 
     listaFilmes.appendChild(card)
   })
@@ -101,7 +138,7 @@ function atualizarBotaoFavorito(botao, favoritado) {
 }
 
 // ---------- favoritar / desfavoritar ----------
-async function alternarFavorito(filme, botao) {
+async function alternarFavorito(filme, botao, contagemEl) {
   const jaFavoritado = idsFavoritados.has(filme.tmdb_movie_id)
 
   botao.disabled = true
@@ -109,6 +146,7 @@ async function alternarFavorito(filme, botao) {
     if (jaFavoritado) {
       await fetch(`/api/favoritos/${filme.tmdb_movie_id}`, { method: 'DELETE' })
       idsFavoritados.delete(filme.tmdb_movie_id)
+      contagemFavoritos[filme.tmdb_movie_id] = Math.max(0, (contagemFavoritos[filme.tmdb_movie_id] || 1) - 1)
     } else {
       await fetch('/api/favoritos', {
         method: 'POST',
@@ -120,9 +158,11 @@ async function alternarFavorito(filme, botao) {
         })
       })
       idsFavoritados.add(filme.tmdb_movie_id)
+      contagemFavoritos[filme.tmdb_movie_id] = (contagemFavoritos[filme.tmdb_movie_id] || 0) + 1
     }
 
     atualizarBotaoFavorito(botao, idsFavoritados.has(filme.tmdb_movie_id))
+    contagemEl.textContent = `${contagemFavoritos[filme.tmdb_movie_id] || 0} favoritos`
 
   } catch (err) {
     mostrarStatus('Erro ao atualizar favorito.')
@@ -135,6 +175,7 @@ async function alternarFavorito(filme, botao) {
 async function carregarComentarios(tmdbMovieId, listaComentariosEl) {
   try {
     const resposta = await fetch(`/api/comentarios/${tmdbMovieId}`)
+    if (!resposta.ok) return // usuário sem nível suficiente, silencioso
     const comentarios = await resposta.json()
 
     listaComentariosEl.innerHTML = ''
@@ -145,13 +186,20 @@ async function carregarComentarios(tmdbMovieId, listaComentariosEl) {
       textoSpan.textContent = c.texto
       item.appendChild(textoSpan)
 
-      if (souAdmin) {
+      const souDono = c.usuario_id === meuUsuarioId
+      const souModerador = nivelAoMenos('stalker')
+
+      if (souDono || souModerador) {
         const botaoApagar = document.createElement('button')
         botaoApagar.textContent = '🗑'
         botaoApagar.className = 'botao-apagar-comentario'
         botaoApagar.addEventListener('click', async () => {
           botaoApagar.disabled = true
-          await apagarComentario(c.id)
+          if (souDono) {
+            await apagarComentarioProprio(c.id)
+          } else {
+            await apagarComentarioModeracao(c.id)
+          }
           carregarComentarios(tmdbMovieId, listaComentariosEl)
         })
         item.appendChild(botaoApagar)
@@ -180,7 +228,15 @@ async function enviarComentario(tmdbMovieId, texto, botao) {
   }
 }
 
-async function apagarComentario(id) {
+async function apagarComentarioProprio(id) {
+  try {
+    await fetch(`/api/comentarios/proprio/${id}`, { method: 'DELETE' })
+  } catch (err) {
+    mostrarStatus('Erro ao apagar comentário.')
+  }
+}
+
+async function apagarComentarioModeracao(id) {
   try {
     await fetch(`/api/comentarios/${id}`, { method: 'DELETE' })
   } catch (err) {
