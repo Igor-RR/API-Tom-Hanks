@@ -1,5 +1,5 @@
 const express = require('express')
-const { client } = require('./redisClient')
+const { client } = require('./redisClient.js')
 
 const router = express.Router()
 

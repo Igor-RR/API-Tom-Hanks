@@ -2,7 +2,7 @@ require('dotenv').config() // Lê as variáveis de ambiente
 
 const express = require('express')
 const routes = require('./routes.js')
-const { conectar } = require('./redisClient')
+const { conectar } = require('./redisClient.js/index.js')
 
 const app = express()
 
