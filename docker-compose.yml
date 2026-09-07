@@ -7,8 +7,32 @@ services:
       - "3000:3000"
     depends_on:
       - auth-service
+      - log-service
 
   auth-service:
     build: ./auth-service
     image: igorrueda/api-tom-hanks-microserv-auth-service:latest
     env_file: .env
+    depends_on:
+      - log-service
+
+  redis:
+    image: redis:7-alpine
+    # sem "ports:" -- mesmo princípio do auth-service: só acessível pela
+    # rede interna do Docker, nunca pela internet
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  log-service:
+    build: ./log-service
+    image: igorrueda/api-tom-hanks-microserv-log-service:latest
+    # sem "ports:" -- não publicado pro host
+    env_file: .env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis-data:
