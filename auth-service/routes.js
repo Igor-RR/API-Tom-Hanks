@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken')
 const nodemailer = require('nodemailer')
 const rateLimit = require('express-rate-limit')
 const db = require('./db')
+const { registrarEvento } = require('./logClient') // LOG: helper de auditoria
 
 const router = express.Router()
 
@@ -90,6 +91,14 @@ router.post('/login', limitadorSensivel, async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: '15m' } //Expira em 15 minutos
     )
+
+    // LOG: login bem-sucedido -- fire-and-forget, não bloqueia a resposta
+    registrarEvento({
+      usuario_id: usuario.id,
+      acao: 'login',
+      ip_origem: req.ip,
+      detalhe: `role=${usuario.role}`
+    })
 
     res.json({ token })
 
