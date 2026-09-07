@@ -2,10 +2,12 @@ const express = require('express')
 const jwt = require('jsonwebtoken')
 const rateLimit = require('express-rate-limit')
 const db = require('./db')
+const { registrarEvento } = require('./logClient') // LOG: helper de auditoria
 
 const router = express.Router()
 
 const AUTH_URL = process.env.AUTH_SERVICE_URL
+const LOG_URL = process.env.LOG_SERVICE_URL // LOG: usado só na rota de consulta (proxy)
 const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
 
 function nivelDe(role) {
@@ -30,6 +32,14 @@ function exigirLogin(req, res, next) {
 function exigirNivel(roleMinimo) {
   return (req, res, next) => {
     if (nivelDe(req.usuario.role) < nivelDe(roleMinimo)) {
+      // LOG: toda tentativa de ação negada por permissão -- ponto único,
+      // cobre qualquer rota que passe por exigirNivel
+      registrarEvento({
+        usuario_id: req.usuario.usuario_id,
+        acao: 'acesso_negado',
+        ip_origem: req.ip,
+        detalhe: `rota=${req.method} ${req.originalUrl} role_atual=${req.usuario.role} nivel_exigido=${roleMinimo}`
+      })
       return res.status(403).json({ mensagem: 'Seu papel não tem permissão para essa ação.' })
     }
     next()
@@ -100,6 +110,24 @@ router.post('/auth/login', async (req, res) => {
 })
 
 router.post('/auth/logout', (req, res) => {
+  // LOG: rastreabilidade de logout, mesmo sem "sessão" real (JWT stateless).
+  // Usa jwt.decode (NÃO jwt.verify) de propósito: aqui só queremos extrair
+  // o usuario_id pra fins de auditoria, mesmo se o token já tiver expirado.
+  // Esse valor nunca é usado pra autorizar nada -- só entra no log.
+  const token = req.cookies.token
+  let usuarioId = null
+
+  if (token) {
+    const payload = jwt.decode(token)
+    usuarioId = payload && payload.usuario_id != null ? payload.usuario_id : null
+  }
+
+  registrarEvento({
+    usuario_id: usuarioId,
+    acao: 'logout',
+    ip_origem: req.ip
+  })
+
   res.clearCookie('token')
   res.json({ mensagem: 'Logout realizado.' })
 })
@@ -207,6 +235,15 @@ router.post('/favoritos', exigirLogin, exigirNivel('fan'), limitadorEscrita, asy
       'INSERT INTO favoritos (usuario_id, tmdb_movie_id, titulo, poster_path) VALUES (?, ?, ?, ?)',
       [req.usuario.usuario_id, tmdb_movie_id, titulo, poster_path]
     )
+
+    // LOG: favoritar com sucesso
+    registrarEvento({
+      usuario_id: req.usuario.usuario_id,
+      acao: 'favoritar',
+      ip_origem: req.ip,
+      detalhe: `tmdb_movie_id=${tmdb_movie_id}`
+    })
+
     res.status(201).json({ mensagem: 'Favoritado com sucesso.' })
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
@@ -269,6 +306,15 @@ router.post('/comentarios', exigirLogin, exigirNivel('fan'), limitadorEscrita, a
       'INSERT INTO comentarios (usuario_id, tmdb_movie_id, texto) VALUES (?, ?, ?)',
       [req.usuario.usuario_id, tmdb_movie_id, texto]
     )
+
+    // LOG: comentário criado com sucesso
+    registrarEvento({
+      usuario_id: req.usuario.usuario_id,
+      acao: 'comentar',
+      ip_origem: req.ip,
+      detalhe: `tmdb_movie_id=${tmdb_movie_id}`
+    })
+
     res.status(201).json({ mensagem: 'Comentário adicionado.' })
   } catch (err) {
     console.error(err)
@@ -292,9 +338,20 @@ router.delete('/comentarios/proprio/:id', exigirLogin, exigirNivel('fan'), limit
   }
 })
 
+// rota de MODERAÇÃO -- exclusiva de stalker (o papel-teto assume o lugar de "admin")
 router.delete('/comentarios/:id', exigirLogin, exigirNivel('stalker'), limitadorEscrita, async (req, res) => {
   try {
     await db.query('DELETE FROM comentarios WHERE id = ?', [req.params.id])
+
+    // LOG: apagar comentário via moderação (diferente do auto-delete acima,
+    // que não é logado por não ser um evento de moderação)
+    registrarEvento({
+      usuario_id: req.usuario.usuario_id,
+      acao: 'comentario_deletado_moderacao',
+      ip_origem: req.ip,
+      detalhe: `comentario_id=${req.params.id}`
+    })
+
     res.json({ mensagem: 'Comentário removido pela moderação.' })
   } catch (err) {
     console.error(err)
@@ -366,6 +423,22 @@ router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), 
   } catch (err) {
     console.error(err)
     res.status(500).json({ mensagem: 'Erro ao remover filme.' })
+  }
+})
+
+// ---------- LOGS (só stalker) ----------
+
+// proxy pro log-service -- mesmo padrão dos proxies de auth acima.
+// O log-service em si não sabe o que é JWT; quem autoriza é este middleware.
+router.get('/logs', exigirLogin, exigirNivel('stalker'), async (req, res) => {
+  try {
+    const limite = req.query.limit || 50
+    const resposta = await fetch(`${LOG_URL}/eventos?limit=${limite}`)
+    const dados = await resposta.json()
+    res.status(resposta.status).json(dados)
+  } catch (err) {
+    console.error(err)
+    res.status(502).json({ mensagem: 'Serviço de log indisponível.' })
   }
 })
 
