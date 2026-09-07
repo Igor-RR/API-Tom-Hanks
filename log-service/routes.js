@@ -1,5 +1,6 @@
 const express = require('express')
-const { client } = require('./redisClient.js')
+const { client } = require('./redisClient')
+const { enfileirar, tamanhoFila } = require('./queue')
 
 const router = express.Router()
 
@@ -19,31 +20,31 @@ const ACOES_VALIDAS = [
 // ---------- REGISTRAR EVENTO ----------
 // Chamado internamente pelo auth-service e pelo catálogo. Nunca deve ser
 // exposto à internet -- esse container não tem porta publicada.
-router.post('/eventos', async (req, res) => {
+//
+// Não grava no Redis aqui -- só valida e enfileira. Quem grava (XADD) é o
+// worker em background (queue.js), de um em um. Isso garante que o log-service
+// responde rápido pra quem chamou, mesmo que o Redis esteja temporariamente
+// lento -- reforçando, numa segunda camada, que log nunca deve atrasar ou
+// derrubar a ação principal do usuário (a primeira camada já é o
+// fire-and-forget no catálogo/auth-service).
+router.post('/eventos', (req, res) => {
   const { usuario_id, acao, ip_origem, detalhe } = req.body
 
   if (!acao || !ACOES_VALIDAS.includes(acao)) {
     return res.status(400).json({ mensagem: 'Ação inválida ou não informada.' })
   }
 
-  try {
-    // XADD exige campos como string; timestamp é gerado aqui, no momento
-    // real da gravação, não no serviço de origem (evita divergência de relógio)
-    const campos = {
-      usuario_id: usuario_id != null ? String(usuario_id) : '',
-      acao,
-      timestamp: new Date().toISOString(),
-      ip_origem: ip_origem || '',
-      detalhe: detalhe || ''
-    }
+  // timestamp gerado aqui, no momento em que o evento chega -- não quando
+  // o worker eventualmente grava -- pra refletir a ordem real de chegada
+  enfileirar({
+    usuario_id,
+    acao,
+    timestamp: new Date().toISOString(),
+    ip_origem,
+    detalhe
+  })
 
-    const id = await client.xAdd(STREAM_KEY, '*', campos)
-
-    res.status(201).json({ mensagem: 'Evento registrado.', id })
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ mensagem: 'Erro ao registrar evento.' })
-  }
+  res.status(202).json({ mensagem: 'Evento aceito para gravação.' })
 })
 
 // ---------- CONSULTAR ÚLTIMOS N EVENTOS ----------
@@ -55,7 +56,10 @@ router.get('/eventos', async (req, res) => {
 
   try {
     // XREVRANGE devolve do mais recente pro mais antigo; invertemos no fim
-    // pra apresentar em ordem cronológica (o que aconteceu primeiro, primeiro)
+    // pra apresentar em ordem cronológica (o que aconteceu primeiro, primeiro).
+    // Importante: eventos ainda na fila em memória (não gravados ainda) não
+    // aparecem aqui até o worker processá-los -- normalmente questão de
+    // milissegundos, mas em teoria pode causar uma pequena defasagem.
     const entradas = await client.xRevRange(STREAM_KEY, '+', '-', { COUNT: limite })
 
     const eventos = entradas
@@ -70,6 +74,13 @@ router.get('/eventos', async (req, res) => {
     console.error(err)
     res.status(500).json({ mensagem: 'Erro ao consultar eventos.' })
   }
+})
+
+// ---------- DIAGNÓSTICO: tamanho atual da fila ----------
+// Rota simples de observabilidade -- útil pra confirmar, durante a demo ou
+// depuração, que a fila não está acumulando (sinal de Redis fora do ar).
+router.get('/fila/status', (req, res) => {
+  res.json({ eventos_pendentes: tamanhoFila() })
 })
 
 module.exports = router
