@@ -86,7 +86,7 @@ Navegador → catálogo (único ponto público)
                 ├── auth-service (rede interna do Docker, sem porta pública)
                 │         │
                 │         ├── MariaDB (usuários, reset_tokens)
-                │         └── SMTP (Mailtrap em dev / Gmail SMTP em produção)
+                │         └── SMTP (Gmail SMTP)
                 │
                 └── log-service (rede interna do Docker, sem porta pública)
                           │
@@ -175,7 +175,7 @@ XRANGE logs:eventos - +
 - **Log de auditoria:** Redis (Streams), isolado no `log-service`
 - **API externa:** TMDB (The Movie Database)
 - **Autenticação:** JWT (`jsonwebtoken`) em cookie httpOnly (`cookie-parser`, no catálogo) + bcrypt + crypto (no auth-service)
-- **E-mail transacional:** nodemailer — Mailtrap (dev/sandbox) / Gmail SMTP (produção, usado por não haver acesso ao DNS do subdomínio para verificar domínio em Brevo/Resend)
+- **E-mail transacional:** Gmail SMTP
 - **Deploy:** Docker + Docker Hub + Docker Compose + Portainer
 
 ## Estrutura do projeto
@@ -237,7 +237,7 @@ XRANGE logs:eventos - +
 - Docker e Docker Compose
 - Acesso a um banco MariaDB (local ou remoto)
 - Chave de API do TMDB ([obter aqui](https://www.themoviedb.org/settings/api)) — requer criar conta na plataforma
-- Conta no [Mailtrap](https://mailtrap.io) (Email Sandbox — não exige cadastro de domínio) para testes locais de e-mail
+- Conta no Google para @gmail.com
 
 O Redis usado pelo `log-service` **não precisa ser provisionado à parte** — sobe junto com os demais serviços pelo próprio `docker-compose.yml`.
 
@@ -339,7 +339,7 @@ UPDATE usuarios SET role = 'stalker' WHERE email = 'seu-email@exemplo.com';
 | `LOG_SERVICE_URL` | catálogo, auth-service | URL interna do log-service (ex: `http://log-service:5000`) |
 | `PORT_AUTH` | auth-service | Porta interna em que o auth-service escuta (uso interno, sem exposição) |
 | `APP_URL` | auth-service | URL pública do catálogo — usada para montar o link de redefinição de senha enviado por e-mail (ex: `https://seu-dominio.com`, sem porta e sem barra final) |
-| `SMTP_HOST` | auth-service | Host do servidor SMTP (Mailtrap em dev, Gmail em produção) |
+| `SMTP_HOST` | auth-service | Host do servidor SMTP (Gmail) |
 | `SMTP_PORT` | auth-service | Porta SMTP |
 | `SMTP_USER` | auth-service | Usuário/e-mail de autenticação SMTP |
 | `SMTP_PASS` | auth-service | Senha SMTP (senha de app, no caso do Gmail — nunca a senha normal da conta) |
