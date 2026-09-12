@@ -162,7 +162,7 @@ XRANGE logs:eventos - +
 
 ## Stack
 
-- **Backend:** Node.js + Express (três serviços independentes)
+- **Backend:** Node.js + Express
 - **Frontend:** HTML, CSS e JavaScript puros (sem framework), servido pelo `catalogo`
 - **Banco de dados:** MariaDB (remoto, compartilhado pelo catálogo e pelo auth-service)
 - **Log de auditoria:** Redis (Streams), isolado no `log-service`
@@ -446,5 +446,3 @@ Pontos importantes:
 - **O volume `redis-data` garante persistência do stream em disco** entre reinicializações do container do Redis (`--appendonly yes`) — sem ele, um restart do container do Redis apagaria todo o histórico de auditoria já gravado.
 - Após qualquer mudança de código, é necessário `docker compose build && docker compose push` local, seguido de **"Re-pull image and redeploy"** na stack do Portainer.
 - Após qualquer mudança apenas nas variáveis de ambiente ou no `docker-compose.yml` (sem mudança de código), basta **"Update the stack"** no Portainer.
-
-Em produção, o envio de e-mail usa Gmail SMTP como remetente.
