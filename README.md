@@ -160,13 +160,6 @@ docker compose exec redis redis-cli
 XRANGE logs:eventos - +
 ```
 
-### Limitações conhecidas / trabalhos futuros
-
-- **Sem política de retenção**: o stream cresce indefinidamente (o Redis está configurado com `appendonly yes`, persistindo tudo em disco). Em um cenário real, seria necessário `XTRIM` periódico ou TTL para limitar espaço e para minimização de dados.
-- **Dado de auditoria como dado pessoal**: mesmo sendo apenas o IP interno do container (não o IP público do cliente), o histórico de ações por `usuario_id` com timestamp é dado pessoal em um cenário de produção real, e exigiria política de retenção e controle de acesso mais rígido sob LGPD/GDPR — não "log para sempre" acessível a qualquer conta `stalker`.
-- **Fila em memória não é durável**: eventos pendentes de gravação se perdem se o container do log-service reiniciar antes de drená-los. Uma evolução possível seria usar uma estrutura de fila que sobrevive a restart (ex: uma Redis List como buffer intermediário, com um worker consumindo via `BRPOP`), sem introduzir um componente de infraestrutura novo.
-- **Não há tela de administração de papéis**: promoção a `stalker` (que também controla quem acessa os logs) é feita diretamente no banco, então o controle de quem pode auditar depende inteiramente do controle de acesso ao banco de dados em si.
-
 ## Stack
 
 - **Backend:** Node.js + Express (três serviços independentes)
