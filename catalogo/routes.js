@@ -8,7 +8,10 @@ const router = express.Router()
 
 const AUTH_URL = process.env.AUTH_SERVICE_URL
 const LOG_URL = process.env.LOG_SERVICE_URL // LOG: usado só na rota de consulta (proxy)
-const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
+// 'admin' é o nível 5, exclusivo do administrador do produto: herda tudo de
+// stalker (favoritar, comentar, moderar, tier list) e, além disso, é o único
+// que passa em exigirNivel('admin') -- usado só pela rota de log de auditoria
+const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker', 'admin']
 
 function nivelDe(role) {
   return HIERARQUIA.indexOf(role)
@@ -426,11 +429,11 @@ router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), 
   }
 })
 
-// ---------- LOGS (só stalker) ----------
+// ---------- LOGS (só admin) ----------
 
-// proxy pro log-service -- mesmo padrão dos proxies de auth acima.
-// O log-service em si não sabe o que é JWT; quem autoriza é este middleware.
-router.get('/logs', exigirLogin, exigirNivel('stalker'), async (req, res) => {
+// Apenas 'admin' pode acessar ios Logs de auditoria. Essa rota foi pensada devido a questões
+// de segurança/compliance.
+router.get('/logs', exigirLogin, exigirNivel('admin'), async (req, res) => {
   try {
     const limite = req.query.limit || 50
     const resposta = await fetch(`${LOG_URL}/eventos?limit=${limite}`)

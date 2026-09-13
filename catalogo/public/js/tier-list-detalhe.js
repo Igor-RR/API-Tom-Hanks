@@ -5,7 +5,7 @@ const secaoNaoClassificados = document.getElementById('secao-nao-classificados')
 const listaNaoClassificados = document.getElementById('lista-nao-classificados')
 const modeloFileira = document.getElementById('modelo-fileira-tier')
 const modeloPoster = document.getElementById('modelo-poster-tier')
-const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
+const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker','admin']
 const TIERS = ['S', 'A', 'B', 'C', 'D']
 
 const params = new URLSearchParams(window.location.search)

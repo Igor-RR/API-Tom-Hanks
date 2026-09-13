@@ -10,7 +10,7 @@ const modalTexto = document.getElementById('modal-texto')
 const modalBtnCancelar = document.getElementById('modal-btn-cancelar')
 const modalBtnAssinar = document.getElementById('modal-btn-assinar')
 
-const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker']
+const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker','admin']
 
 let idsFavoritados = new Set()
 let contagemFavoritos = {}
