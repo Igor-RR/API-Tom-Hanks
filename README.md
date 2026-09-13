@@ -2,14 +2,14 @@
 
 Aplicação web de catálogo de filmes com Tom Hanks, consumindo a API do [TMDB](https://www.themoviedb.org/documentation/api) em tempo real. Usuários podem se cadastrar, fazer login, favoritar filmes, comentar e montar suas próprias tier lists — tudo isolado por conta, com persistência em MariaDB.
 
-A aplicação é dividida em **três serviços independentes**: um catálogo público, um serviço de autenticação isolado e um serviço de log de auditoria isolado — os dois últimos não são acessíveis diretamente pela internet. O controle de acesso segue o modelo **RBAC** (Role-Based Access Control), com 4 papéis hierárquicos e permissões crescentes.
+A aplicação é dividida em **três serviços independentes**: um catálogo público, um serviço de autenticação isolado e um serviço de log de auditoria isolado — os dois últimos não são acessíveis diretamente pela internet. O controle de acesso segue o modelo **RBAC** (Role-Based Access Control), com 5 papéis hierárquicos e permissões crescentes.
 
 Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 
 ## Funcionalidades
 
 - Cadastro e login próprios da aplicação, com sessão via **JWT em cookie httpOnly**
-- 4 papéis de usuário hierárquicos (`espectador` < `fan` < `cinefilo` < `stalker`), cada um herdando as permissões do anterior
+- 5 papéis de usuário hierárquicos (`espectador` < `fan` < `cinefilo` < `stalker` < `admin`), cada um herdando as permissões do anterior
 - Recuperação de senha por e-mail, com token de expiração de 30 minutos e uso único
 - Listagem de filmes com Tom Hanks, buscados ao vivo na API do TMDB (pôster, título e sinopse nunca são salvos localmente)
 - Contagem pública de favoritos por filme, visível a qualquer usuário logado
@@ -17,11 +17,11 @@ Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 - Ver os comentários de todos os usuários, não só os próprios (a partir do papel `cinefilo`)
 - Moderação: apagar qualquer comentário (a partir do papel `stalker`)
 - Tier lists **pessoais**: cada `stalker` monta e mantém sua própria classificação de filmes (S/A/B/C/D, com pôsteres); qualquer usuário logado pode navegar e visualizar a tier list de qualquer stalker, mas só o dono edita a sua
-- Página de Planos, listando os 4 papéis com seus recursos e limitações, destacando o plano atual do usuário
+- Página de Planos, listando os 4 papéis de consumo com seus recursos e limitações, destacando o plano atual do usuário — `admin` não é um plano vendável e não aparece nessa página
 - Recursos bloqueados por papel continuam visíveis na interface (não são escondidos), mas abrem um modal de upgrade ao serem acionados sem permissão — a validação de segurança real acontece sempre no backend, nunca depende do que a interface mostra ou esconde
 - Isolamento total de dados entre contas diferentes — cada usuário só acessa seus próprios favoritos e comentários
 - Limite de requisições (rate limiting) em rotas sensíveis e de escrita, para reduzir risco de força bruta e sobrecarga do banco
-- **Log de auditoria**: login, logout, favoritar, comentar, apagar comentário (moderação) e toda tentativa de ação negada por permissão (`403`) são registrados num serviço próprio, consultável apenas por `stalker` (ver seção [Log de auditoria (log-service)](#log-de-auditoria-log-service))
+- **Log de auditoria**: login, logout, favoritar, comentar, apagar comentário (moderação) e toda tentativa de ação negada por permissão (`403`) são registrados num serviço próprio, consultável apenas por `admin` (ver seção [Log de auditoria (log-service)](#log-de-auditoria-log-service))
 
 ## Controle de acesso (RBAC)
 
@@ -34,7 +34,8 @@ As permissões são **cumulativas** — um papel superior sempre pode tudo que o
 | `espectador` | 1 | Ver a lista de filmes; ver a contagem de favoritos por filme; visualizar a tier list de qualquer stalker |
 | `fan` | 2 | Tudo do espectador **+** favoritar/desfavoritar filmes; comentar; apagar os próprios comentários; ver apenas os próprios comentários em cada filme |
 | `cinefilo` | 3 | Tudo do fan **+** ver os comentários de **todos** os usuários em cada filme |
-| `stalker` | 4 | Tudo do cinéfilo **+** apagar **qualquer** comentário (moderação); criar e editar a própria tier list; consultar o log de auditoria |
+| `stalker` | 4 | Tudo do cinéfilo **+** apagar **qualquer** comentário (moderação); criar e editar a própria tier list |
+| `admin` | 5 | Tudo do stalker **+** consultar o log de auditoria |
 
 Todo usuário novo nasce no papel `espectador`. A promoção de papel é feita diretamente no banco (não há tela de administração de papéis nesta versão):
 ```sql
@@ -42,7 +43,7 @@ UPDATE usuarios SET role = 'fan' WHERE email = 'seu-email@exemplo.com';
 ```
 É necessário fazer login novamente após a alteração, já que o papel fica embutido no token JWT emitido no momento do login (ver seção "Padrão de arquitetura" abaixo).
 
-Não existe um papel "administrador" separado neste projeto: o `stalker`, topo da hierarquia, acumula tanto a moderação de comentários quanto o acesso ao log de auditoria.
+`admin` é o topo da hierarquia, mas é um papel **exclusivo do administrador do produto** — não é um plano vendável ao usuário final. A página de Planos (`planos.html`) lista apenas os 4 papéis de consumo (`espectador` a `stalker`); `admin` nunca aparece lá, por decisão de produto, não por limitação técnica. Log de auditoria é uma questão de segurança/compliance, não um benefício de assinatura — nenhum usuário pagante, por mais alto que seja seu plano (`stalker`), tem acesso aos logs.
 
 ### Enforcement: nunca só na interface
 
@@ -61,9 +62,9 @@ Este projeto usa o **Padrão B**: o `auth-service` assina um JWT contendo `usuar
 
 Se fosse trocado para o Padrão A, o `catalogo` deixaria de decodificar o token sozinho e passaria a fazer uma chamada HTTP interna ao `auth-service` (ex: `GET /verificar-permissao`) a cada ação sensível, perguntando se aquele `usuario_id` tem o papel necessário — o middleware `exigirNivel` deixaria de ler `req.usuario.role` do JWT e passaria a aguardar essa resposta de rede antes de decidir. Isso tornaria mudanças de papel (ex: promover um usuário) instantâneas, mas colocaria o `auth-service` como dependência síncrona de toda ação da aplicação, e a latência de rede aumentaria em cada requisição.
 
-O `log-service`, por sua vez, **não participa** dessa decisão de autorização — ele nunca decodifica JWT nem sabe o que é um papel. Quem autoriza o acesso ao log é sempre o mesmo middleware `exigirNivel('stalker')` do catálogo, que só então repassa a consulta ao log-service via proxy interno.
+O `log-service`, por sua vez, **não participa** dessa decisão de autorização — ele nunca decodifica JWT nem sabe o que é um papel. Quem autoriza o acesso ao log é sempre o mesmo middleware `exigirNivel('admin')` do catálogo, que só então repassa a consulta ao log-service via proxy interno. Nem `stalker` — o topo da hierarquia de consumo do produto — passa nessa checagem.
 
-## Demonstração
+## Demonstrações
 
 - **Espectador**:
 ![alt text](test-pictures/teste-espectador.png)
@@ -75,6 +76,15 @@ O `log-service`, por sua vez, **não participa** dessa decisão de autorização
 ![alt text](test-pictures/test-stalker-before.png)
 ![alt text](test-pictures/test-stalker-after.png)
 
+- **Usuário indevido tentando executar ação de um papel com mais privilégios**:
+![alt text](test-pictures/teste-403-usuario-sem-permissao.png)
+![alt text](test-pictures/teste-403-usuario-sem-permissao2.png)
+
+-**Usuário "stalker"(com todos os privégios de conteúdo,menos acesso a log) tentando verificar logs**:
+![alt text](test-pictures/teste-log-not-admin.png)
+
+-**Usuário "admin" tentando verificar logs**:
+![alt text](test-pictures/teste-log-admin.png)
 
 ## Arquitetura
 
@@ -143,7 +153,7 @@ POST /eventos → valida → enfileira (memória) → responde 202
 - `GET /fila/status` — diagnóstico: quantidade de eventos ainda pendentes de gravação
 
 **catálogo** (público, proxy protegido):
-- `GET /api/logs?limit=N` — protegido por `exigirLogin` + `exigirNivel('stalker')`, o mesmo controle de acesso das rotas de moderação e tier list. Um `usuario` comum recebe `403`.
+- `GET /api/logs?limit=N` — protegido por `exigirLogin` + `exigirNivel('admin')`. Um `stalker` (ou qualquer papel abaixo dele) recebe `403` — moderar comentários e ver os logs são permissões independentes, mesmo `stalker` sendo o topo da hierarquia de consumo do produto.
 
 ### Demonstração do log de auditoria
 
@@ -152,7 +162,8 @@ POST /eventos → valida → enfileira (memória) → responde 202
 3. Comentar (`POST /api/comentarios`) → evento `comentar` registrado
 4. Com um usuário **não-stalker**, tentar apagar um comentário de moderação (`DELETE /api/comentarios/:id`) → recebe `403`, evento `acesso_negado` registrado
 5. Fazer logout (`POST /api/auth/logout`) → evento `logout` registrado
-6. Logar como **stalker** e consultar `GET /api/logs?limit=20` (pelo navegador ou via `fetch` no DevTools) → todos os eventos acima aparecem, na ordem em que aconteceram
+6. Com uma conta **stalker** (não-admin), tentar `GET /api/logs?limit=20` → recebe `403` também, provando que moderação e auditoria são permissões independentes
+7. Logar como **admin** e consultar `GET /api/logs?limit=20` (pelo navegador ou via `fetch` no DevTools) → todos os eventos acima aparecem, na ordem em que aconteceram
 
 Para inspecionar o stream diretamente no Redis (depuração, fora do fluxo normal da aplicação):
 ```bash
@@ -315,11 +326,17 @@ CREATE TABLE tier_list (
 
 ### Promovendo um usuário
 
-Não há tela de administração de papéis — a promoção é feita diretamente no banco, usando qualquer um dos 4 valores (`espectador`, `fan`, `cinefilo`, `stalker`):
+Não há tela de administração de papéis — a promoção é feita diretamente no banco, usando qualquer um dos 5 valores (`espectador`, `fan`, `cinefilo`, `stalker`, `admin`):
 ```sql
 UPDATE usuarios SET role = 'stalker' WHERE email = 'seu-email@exemplo.com';
 ```
-É necessário logar novamente após a alteração, para que um novo JWT seja emitido com o papel atualizado. Lembrando que `stalker` também é quem passa a ter acesso à rota de consulta do log de auditoria.
+É necessário logar novamente após a alteração, para que um novo JWT seja emitido com o papel atualizado.
+
+O papel `admin` é reservado ao administrador do produto e **não deve ser oferecido como plano** — não aparece na página de Planos, sendo atribuído apenas manualmente:
+```sql
+UPDATE usuarios SET role = 'admin' WHERE email = 'seu-email@exemplo.com';
+```
+Uma conta `admin` herda todos os recursos de `stalker` e, além disso, é a única com acesso à rota de consulta do log de auditoria (`GET /api/logs`) — nem `stalker` consegue acessá-la.
 
 ## Variáveis de ambiente
 
@@ -357,7 +374,7 @@ Localmente, os três serviços leem o mesmo arquivo `.env` na raiz (o Docker Com
 - O `auth-service` e o `log-service` não são acessíveis pela internet — não possuem porta publicada no `docker-compose.yml`, apenas a rede interna do Docker
 - O catálogo nunca recebe ou armazena o hash de senha de um usuário
 - Toda consulta a favoritos/comentários/tier list pessoal é filtrada por `usuario_id`, extraído do JWT validado
-- A consulta ao log de auditoria (`GET /api/logs`) é restrita a `stalker`, pelo mesmo middleware `exigirNivel` usado nas demais rotas sensíveis
+- A consulta ao log de auditoria (`GET /api/logs`) é restrita a `admin`, pelo mesmo middleware `exigirNivel` usado nas demais rotas sensíveis — nem `stalker`, o topo da hierarquia de consumo do produto, tem acesso
 - Rotas de escrita (favoritar, comentar, classificar filme, apagar) e as rotas de login/esqueci-senha possuem limite de requisições (`express-rate-limit`)
 - A rota de "esqueci minha senha" sempre responde a mesma mensagem, exista ou não o e-mail informado, evitando enumeração de contas cadastradas
 - Chamadas de auditoria (`catalogo`/`auth-service` → `log-service`) são fire-and-forget: uma falha no log nunca bloqueia nem reverte a ação principal do usuário
