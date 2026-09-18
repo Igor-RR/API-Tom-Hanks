@@ -5,7 +5,9 @@
 #
 # Adiciona um MariaDB efêmero (sem volume, dados descartados ao final do job)
 # e aponta DB_HOST do catalogo/auth-service para ele, mantendo tudo na mesma
-# rede Docker criada pelo compose.
+# rede Docker criada pelo compose -- por isso o catalogo/auth-service
+# conseguem resolver "mariadb" pelo nome, igual já fazem com "auth-service"
+# e "log-service".
 
 services:
   mariadb:
@@ -16,10 +18,15 @@ services:
       MYSQL_USER: catalogo_test
       MYSQL_PASSWORD: teste
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pteste"]
+      # healthcheck.sh vem embutido na imagem oficial do MariaDB e sabe
+      # diferenciar "ainda inicializando" de "com problema de verdade" --
+      # mais confiável que um "mysqladmin ping" cru, que pode falhar
+      # transitoriamente durante a fase interna de setup do container.
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
       timeout: 5s
       retries: 20
+      start_period: 40s
 
   catalogo:
     environment:
