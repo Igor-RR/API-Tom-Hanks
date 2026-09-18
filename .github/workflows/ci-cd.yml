@@ -46,32 +46,42 @@ jobs:
       # Se qualquer uma dessas chamadas falhar, o job (e o pipeline) quebra aqui.
       - name: Testar cadastro e login
         run: |
-          set -e
           EMAIL="ci-teste-$(date +%s)@exemplo.com"
           SENHA="senha123456"
 
           echo "Cadastrando usuário de teste ($EMAIL)..."
-          curl -sf -X POST http://localhost:3000/api/auth/cadastro \
+          STATUS_CADASTRO=$(curl -s -o /tmp/cadastro.json -w "%{http_code}" -X POST http://localhost:3000/api/auth/cadastro \
             -H "Content-Type: application/json" \
-            -d "{\"nome\":\"CI Teste\",\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}"
+            -d "{\"nome\":\"CI Teste\",\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}")
+
+          echo "Status HTTP do cadastro: $STATUS_CADASTRO"
+          cat /tmp/cadastro.json
+          echo ""
+
+          if [ "$STATUS_CADASTRO" != "201" ]; then
+            echo ""
+            echo "Cadastro falhou -- pipeline quebrado."
+            exit 1
+          fi
 
           echo ""
           echo "Fazendo login..."
-          STATUS=$(curl -s -o /tmp/login.json -w "%{http_code}" -X POST http://localhost:3000/api/auth/login \
+          STATUS_LOGIN=$(curl -s -o /tmp/login.json -w "%{http_code}" -X POST http://localhost:3000/api/auth/login \
             -H "Content-Type: application/json" \
             -d "{\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}")
 
-          echo "Status HTTP do login: $STATUS"
+          echo "Status HTTP do login: $STATUS_LOGIN"
           cat /tmp/login.json
+          echo ""
 
-          if [ "$STATUS" != "200" ]; then
+          if [ "$STATUS_LOGIN" != "200" ]; then
             echo ""
             echo "Login falhou -- pipeline quebrado."
             exit 1
           fi
 
           echo ""
-          echo "Login OK -- rota de autenticação está funcionando."
+          echo "Cadastro e login OK -- rota de autenticação está funcionando."
 
       - name: Logs dos containers (em caso de falha)
         if: failure()
