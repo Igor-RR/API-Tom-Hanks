@@ -1,0 +1,48 @@
+# Usado SOMENTE pelo pipeline de CI, combinado com o docker-compose.yml
+# principal:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --wait
+#
+# Adiciona um MariaDB efêmero (sem volume, dados descartados ao final do job)
+# e aponta DB_HOST do catalogo/auth-service para ele, mantendo tudo na mesma
+# rede Docker criada pelo compose.
+
+services:
+  mariadb:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: teste
+      MYSQL_DATABASE: catalogo_test
+      MYSQL_USER: catalogo_test
+      MYSQL_PASSWORD: teste
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pteste"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  catalogo:
+    environment:
+      - DB_HOST=mariadb
+      - DB_USER=catalogo_test
+      - DB_PASSWORD=teste
+      - DB_NAME=catalogo_test
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      log-service:
+        condition: service_started
+
+  auth-service:
+    environment:
+      - DB_HOST=mariadb
+      - DB_USER=catalogo_test
+      - DB_PASSWORD=teste
+      - DB_NAME=catalogo_test
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      log-service:
+        condition: service_started
