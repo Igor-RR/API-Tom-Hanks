@@ -1,4 +1,6 @@
 name: CI/CD
+
+# Só roda em push na main -- sem branches de desenvolvimento paralelas neste projeto
 on:
   push:
     branches: [main]
@@ -23,7 +25,7 @@ jobs:
       - name: Aplicar schema no banco de teste
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml \
-            exec -T mariadb mysql -u root -pteste catalogo_test < .github/ci/schema.sql
+            exec -T mariadb mariadb -u root -pteste catalogo_test < .github/ci/schema.sql
 
       - name: Aguardar o catálogo responder
         run: |
@@ -126,7 +128,7 @@ jobs:
             igorrueda/api-tom-hanks-microserv-log-service:latest
             igorrueda/api-tom-hanks-microserv-log-service:sha-${{ steps.vars.outputs.sha_short }}
 
-      # DEPLOY: não automatizado nesta versão.Ver README, seção "Deploy",
+      # DEPLOY: não automatizado nesta versão. Ver README, seção "Deploy",
       # para o passo manual que fecha o restante do fluxo.
       - name: Lembrete de deploy manual
         run: |
