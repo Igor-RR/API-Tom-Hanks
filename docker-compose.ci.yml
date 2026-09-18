@@ -1,5 +1,6 @@
 name: CI/CD
 
+# Só roda em push na main -- sem branches de desenvolvimento paralelas neste projeto
 on:
   push:
     branches: [main]
@@ -127,7 +128,12 @@ jobs:
             igorrueda/api-tom-hanks-microserv-log-service:latest
             igorrueda/api-tom-hanks-microserv-log-service:sha-${{ steps.vars.outputs.sha_short }}
 
-      # DEPLOY: não automatizado nesta versão .Ver README, seção "Deploy",
+      # DEPLOY: não automatizado nesta versão -- a stack roda num ambiente
+      # Portainer compartilhado, gerenciado pelo professor, criada via "Web
+      # editor" (não via "Repository"), e o webhook de atualização automática
+      # do Portainer só existe para stacks com origem Git. Recriar a stack
+      # como "Repository" resolveria isso, mas não foi feito para não
+      # arriscar mexer no ambiente já em uso. Ver README, seção "Deploy",
       # para o passo manual que fecha o restante do fluxo.
       - name: Lembrete de deploy manual
         run: |
