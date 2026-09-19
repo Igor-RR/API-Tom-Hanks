@@ -80,6 +80,10 @@ O `log-service`, por sua vez, **não participa** dessa decisão de autorização
 ![alt text](test-pictures/teste-403-usuario-sem-permissao.png)
 ![alt text](test-pictures/teste-403-usuario-sem-permissao2.png)
 
+- **GitHUB actions - Prova da Pipeline**:
+https://github.com/Igor-RR/API-Tom-Hanks/actions/runs/35413640888
+![alt text](test-pictures/tag-github-actions.png)
+
 ## Arquitetura
 
 ```
