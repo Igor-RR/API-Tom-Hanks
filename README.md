@@ -43,7 +43,7 @@ UPDATE usuarios SET role = 'fan' WHERE email = 'seu-email@exemplo.com';
 ```
 É necessário fazer login novamente após a alteração, já que o papel fica embutido no token JWT emitido no momento do login (ver seção "Padrão de arquitetura" abaixo).
 
-`admin` é o topo da hierarquia, mas é um papel **exclusivo do administrador do produto** — não é um plano vendável ao usuário final. A página de Planos (`planos.html`) lista apenas os 4 papéis de consumo (`espectador` a `stalker`); `admin` nunca aparece lá, por decisão de produto, não por limitação técnica. Log de auditoria é uma questão de segurança/compliance, não um benefício de assinatura — nenhum usuário pagante, por mais alto que seja seu plano (`stalker`), tem acesso aos logs.
+`admin` é o topo da hierarquia, mas é um papel **exclusivo do administrador do produto** — não é (e não deveria ser) um plano vendável ao usuário final. A página de Planos (`planos.html`) lista apenas os 4 papéis de consumo (`espectador` a `stalker`); `admin` nunca aparece lá, por decisão de produto, não por limitação técnica. Log de auditoria é uma questão de segurança/compliance, não um benefício de assinatura — nenhum usuário pagante, por mais alto que seja seu plano (`stalker`), tem acesso aos logs.
 
 ### Enforcement: nunca só na interface
 
@@ -79,12 +79,6 @@ O `log-service`, por sua vez, **não participa** dessa decisão de autorização
 - **Usuário indevido tentando executar ação de um papel com mais privilégios**:
 ![alt text](test-pictures/teste-403-usuario-sem-permissao.png)
 ![alt text](test-pictures/teste-403-usuario-sem-permissao2.png)
-
--**Usuário "stalker"(com todos os privégios de conteúdo,menos acesso a log) tentando verificar logs**:
-![alt text](test-pictures/teste-log-not-admin.png)
-
--**Usuário "admin" tentando verificar logs**:
-![alt text](test-pictures/teste-log-admin.png)
 
 ## Arquitetura
 
@@ -186,7 +180,15 @@ XRANGE logs:eventos - +
 
 ```
 .
+├── .github/
+│   ├── workflows/
+│   │   └── ci-cd.yml           # pipeline de CI/CD (ver seção "CI/CD")
+│   └── ci/
+│       ├── .env.ci             # variáveis fake, exclusivas do ambiente de CI
+│       └── schema.sql          # schema aplicado no MariaDB efêmero de teste
+│
 ├── docker-compose.yml
+├── docker-compose.ci.yml       # só CI: adiciona um MariaDB de teste à stack
 ├── .env                        # não versionado — veja .env.example
 ├── .env.example
 ├── README.md
@@ -380,6 +382,44 @@ Localmente, os três serviços leem o mesmo arquivo `.env` na raiz (o Docker Com
 - Chamadas de auditoria (`catalogo`/`auth-service` → `log-service`) são fire-and-forget: uma falha no log nunca bloqueia nem reverte a ação principal do usuário
 - Variáveis sensíveis configuradas via ambiente (`.env` local, nunca commitado; ou na tela de variáveis da stack no Portainer), jamais expostas no `Dockerfile` ou no código do cliente
 
+## CI/CD
+
+O repositório tem um pipeline de integração/entrega contínua via **GitHub Actions** (`.github/workflows/ci-cd.yml`), disparado a cada `push` na `main`.
+
+### Job 1 — build-and-test
+
+Builda as 3 imagens e sobe o ambiente completo (catálogo, auth-service, log-service, Redis e um **MariaDB efêmero de teste**) numa rede Docker isolada, criada só para esse job. O MariaDB de teste é definido em `docker-compose.ci.yml`, um arquivo de compose adicional que se combina com o `docker-compose.yml` principal:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --wait
+```
+Ele adiciona o serviço `mariadb` e sobrescreve `DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_NAME` do `catalogo` e do `auth-service` para apontarem para esse banco descartável — mantendo tudo na mesma rede Docker, para os serviços se enxergarem pelo nome, como já fazem entre si em produção.
+
+Depois de subir:
+1. Aplica o schema (`.github/ci/schema.sql`, uma cópia do schema documentado acima) no banco de teste
+2. Cadastra um usuário real via `POST /api/auth/cadastro`
+3. Faz login real via `POST /api/auth/login`, checando o status HTTP e o corpo de cada resposta
+
+Se qualquer uma dessas chamadas não retornar o status esperado, o job falha — e o Job 2 nunca roda. Não há mock nem API fake nesse teste: é o código de produção rodando de ponta a ponta contra um banco de dados de verdade (só que descartável, recriado do zero a cada execução).
+
+As variáveis não relacionadas ao banco (`JWT_SECRET`, `AUTH_SERVICE_URL`, `LOG_SERVICE_URL`, `PORT_*`, etc.) vêm de `.github/ci/.env.ci`, copiado para `.env` no início do job — necessário porque o runner do GitHub Actions é uma máquina limpa, sem nenhum `.env` local; sem esse arquivo, essas variáveis chegariam como `undefined` dentro dos containers. `TMDB_API_KEY` e as `SMTP_*` recebem valores fake nesse arquivo, já que o teste de cadastro/login não depende de nenhum dos dois serviços externos, e não faria sentido commitar uma credencial real só para isso. O `.env.ci` é seguro para versionar — ao contrário do `.env` real, não contém nenhum segredo de produção.
+
+### Job 2 — build-and-push
+
+Só roda se o Job 1 passou (`needs: build-and-test`). Builda as imagens novamente, faz login no Docker Hub e publica cada uma das 3 imagens com duas tags: `latest` e `sha-<hash curto do commit>` — essa segunda é o que garante rastreabilidade: sempre dá para saber exatamente qual código está rodando em produção, e reverter é só apontar a stack para uma tag anterior.
+
+### Secrets necessários (GitHub → Settings → Secrets and variables → Actions)
+
+| Secret | Descrição |
+|---|---|
+| `DOCKERHUB_USERNAME` | Usuário do Docker Hub |
+| `DOCKERHUB_TOKEN` | Access Token do Docker Hub, com permissão **Read & Write** (sem Delete — o pipeline nunca apaga nada, e não faz sentido conceder mais privilégio do que o necessário) |
+
+### Deploy: pendência documentada
+
+O passo de deploy automático (a imagem nova chegando sozinha ao ambiente) **não foi implementado nesta versão**. 
+
+**Como fica o fluxo, então:** o pipeline builda, testa e publica as 3 imagens automaticamente a cada push na `main`. O último passo — atualizar a stack em produção — é manual: no Portainer, em cada serviço da stack, **"Re-pull image and redeploy"**. O job `build-and-push` termina imprimindo as tags publicadas (`sha-<hash>`), exatamente para facilitar copiar/conferir qual imagem puxar manualmente.
+
 ## Deploy
 
 ### Publicando as imagens no Docker Hub
@@ -390,6 +430,8 @@ docker login
 docker compose build
 docker compose push
 ```
+
+Em condições normais de desenvolvimento, isso é feito automaticamente pelo pipeline de CI/CD (ver seção acima) a cada push na `main` — este processo manual continua documentado aqui para builds pontuais ou depuração local.
 
 ### Subindo no Portainer
 
