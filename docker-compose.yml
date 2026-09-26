@@ -8,6 +8,7 @@ services:
     depends_on:
       - auth-service
       - log-service
+      - perfil-service
 
   auth-service:
     build: ./auth-service
@@ -34,5 +35,40 @@ services:
       - redis
     restart: unless-stopped
 
+  garage:
+    image: dxflrs/garage:v2.0.0
+    container_name: garage
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    # Sem "ports:" — só a rede interna do Docker fala com ele (nome do serviço: "garage").
+    restart: unless-stopped
+
+  perfil-service:
+    build: ./perfil-service
+    container_name: perfil-service
+    environment:
+      - PORT_PERFIL=${PORT_PERFIL}
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - GARAGE_ENDPOINT=${GARAGE_ENDPOINT}
+      - GARAGE_REGION=${GARAGE_REGION}
+      - GARAGE_BUCKET=${GARAGE_BUCKET}
+      - GARAGE_ACCESS_KEY_ID=${GARAGE_ACCESS_KEY_ID}
+      - GARAGE_SECRET_ACCESS_KEY=${GARAGE_SECRET_ACCESS_KEY}
+      - PROFILE_IMAGE_MAX_SIZE_MB=${PROFILE_IMAGE_MAX_SIZE_MB}
+      - PRESIGNED_URL_EXPIRATION_SECONDS=${PRESIGNED_URL_EXPIRATION_SECONDS}
+      - LOG_SERVICE_URL=${LOG_SERVICE_URL}
+    # Sem "ports:" — mesmo princípio de isolamento do auth-service e do log-service.
+    # Só o catalogo, pela rede interna do Docker (http://perfil-service:4100), fala com ele.
+    depends_on:
+      - garage
+    restart: unless-stopped
+
 volumes:
   redis-data:
+  garage-meta:
+  garage-data:
