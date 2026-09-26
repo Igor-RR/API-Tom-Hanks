@@ -3,15 +3,37 @@ const jwt = require('jsonwebtoken')
 const rateLimit = require('express-rate-limit')
 const db = require('./db')
 const { registrarEvento } = require('./logClient') // LOG: helper de auditoria
-
+const multer = require('multer')
 const router = express.Router()
 
 const AUTH_URL = process.env.AUTH_SERVICE_URL
-const LOG_URL = process.env.LOG_SERVICE_URL // LOG: usado só na rota de consulta (proxy)
-// 'admin' é o nível 5, exclusivo do administrador do produto: herda tudo de
-// stalker (favoritar, comentar, moderar, tier list) e, além disso, é o único
-// que passa em exigirNivel('admin') -- usado só pela rota de log de auditoria
+const LOG_URL = process.env.LOG_SERVICE_URL
+const PROFILE_URL = process.env.PROFILE_SERVICE_URL
+const TAMANHO_MAXIMO_MB = Number(process.env.PROFILE_IMAGE_MAX_SIZE_MB || 5)
+
 const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker', 'admin']
+
+const uploadFoto = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: TAMANHO_MAXIMO_MB * 1024 * 1024 }
+})
+
+async function buscarFavoritosDoUsuario(usuarioId) {
+  const [linhas] = await db.query(
+    'SELECT tmdb_movie_id, titulo, poster_path FROM favoritos WHERE usuario_id = ?',
+    [usuarioId]
+  )
+  return linhas
+}
+
+// fire-and-forget, mesmo princípio do registrarEvento: nunca trava a resposta principal
+function sincronizarNome(usuarioId, nome) {
+  fetch(`${PROFILE_URL}/perfis/${usuarioId}/nome`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome })
+  }).catch(err => console.error('Falha ao sincronizar nome no profile-service:', err.message))
+}
 
 function nivelDe(role) {
   return HIERARQUIA.indexOf(role)
@@ -443,6 +465,102 @@ router.get('/logs', exigirLogin, exigirNivel('admin'), async (req, res) => {
     console.error(err)
     res.status(502).json({ mensagem: 'Serviço de log indisponível.' })
   }
+})
+
+// ---------- PERFIL ----------
+
+// perfil do PRÓPRIO usuário logado
+router.get('/perfil/me', exigirLogin, async (req, res) => {
+  try {
+    sincronizarNome(req.usuario.usuario_id, req.usuario.nome)
+
+    const [respostaPerfil, favoritos] = await Promise.all([
+      fetch(`${PROFILE_URL}/perfis/${req.usuario.usuario_id}`).then(r => r.json()),
+      buscarFavoritosDoUsuario(req.usuario.usuario_id)
+    ])
+
+    res.json({
+      usuario_id: req.usuario.usuario_id,
+      nome: req.usuario.nome,
+      bio: respostaPerfil.bio,
+      foto_url: respostaPerfil.fotoUrl,
+      favoritos,
+      eh_proprio_perfil: true
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(502).json({ mensagem: 'Serviço de perfil indisponível.' })
+  }
+})
+
+// perfil PÚBLICO de qualquer usuário (só leitura -- igual à tier list)
+router.get('/perfil/:usuario_id', exigirLogin, async (req, res) => {
+  try {
+    const usuarioId = req.params.usuario_id
+
+    const [respostaPerfil, favoritos] = await Promise.all([
+      fetch(`${PROFILE_URL}/perfis/${usuarioId}`).then(r => r.json()),
+      buscarFavoritosDoUsuario(usuarioId)
+    ])
+
+    res.json({
+      usuario_id: Number(usuarioId),
+      nome: respostaPerfil.nome,
+      bio: respostaPerfil.bio,
+      foto_url: respostaPerfil.fotoUrl,
+      favoritos,
+      eh_proprio_perfil: Number(usuarioId) === req.usuario.usuario_id
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(502).json({ mensagem: 'Serviço de perfil indisponível.' })
+  }
+})
+
+// edita a bio do PRÓPRIO perfil -- o id nunca vem do corpo, vem de req.usuario.usuario_id
+router.put('/perfil', exigirLogin, limitadorEscrita, async (req, res) => {
+  try {
+    const resposta = await fetch(`${PROFILE_URL}/perfis/${req.usuario.usuario_id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bio: req.body.bio })
+    })
+    const dados = await resposta.json()
+    res.status(resposta.status).json(dados)
+  } catch (err) {
+    console.error(err)
+    res.status(502).json({ mensagem: 'Serviço de perfil indisponível.' })
+  }
+})
+
+// upload da foto do PRÓPRIO perfil -- mesma regra, alvo é sempre req.usuario.usuario_id
+router.post('/perfil/foto', exigirLogin, limitadorEscrita, uploadFoto.single('foto'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ mensagem: 'Nenhum arquivo enviado. Use o campo "foto".' })
+  }
+
+  try {
+    const formData = new FormData()
+    formData.append('foto', new Blob([req.file.buffer]), req.file.originalname)
+
+    const resposta = await fetch(`${PROFILE_URL}/perfis/${req.usuario.usuario_id}/foto`, {
+      method: 'POST',
+      body: formData
+    })
+    const dados = await resposta.json()
+    res.status(resposta.status).json(dados)
+  } catch (err) {
+    console.error(err)
+    res.status(502).json({ mensagem: 'Serviço de perfil indisponível.' })
+  }
+})
+
+// erro do multer (arquivo maior que o permitido)
+router.use((err, req, res, next) => {
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ mensagem: `Arquivo muito grande. Máximo: ${TAMANHO_MAXIMO_MB}MB.` })
+  }
+  next(err)
 })
 
 module.exports = router
