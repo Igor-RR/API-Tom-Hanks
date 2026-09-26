@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perfil — Tom Hanks</title>
+  <link rel="stylesheet" href="css/index.css">
+  <link rel="stylesheet" href="css/perfil.css">
+</head>
+<body class="pagina-perfil">
+  <header class="topo">
+    <h1>Perfil</h1>
+    <div class="area-usuario">
+      <a href="catalogo.html" class="botao-secundario">Catálogo</a>
+      <a href="tier-list.html" class="botao-secundario">Tier List</a>
+      <button id="btn-logout" class="botao-secundario">Sair</button>
+    </div>
+  </header>
+
+  <main>
+    <p id="mensagem-status" class="status" hidden></p>
+
+    <section id="cabecalho-perfil" class="cabecalho-perfil" hidden>
+      <div class="avatar-wrapper">
+        <img id="avatar-foto" class="avatar-foto" alt="Foto de perfil">
+        <label id="label-trocar-foto" for="input-foto" class="botao-trocar-foto" hidden>Trocar foto</label>
+        <input type="file" id="input-foto" accept="image/jpeg,image/png,image/webp" hidden>
+      </div>
+
+      <div class="info-perfil">
+        <h2 id="nome-usuario"></h2>
+
+        <p id="bio-texto" class="bio-texto"></p>
+
+        <form id="form-bio" class="form-bio" hidden>
+          <textarea id="input-bio" maxlength="280" placeholder="Escreva uma bio curta..."></textarea>
+          <button type="submit">Salvar bio</button>
+        </form>
+        <button id="btn-editar-bio" class="botao-secundario" hidden>Editar bio</button>
+      </div>
+    </section>
+
+    <section class="secao-favoritos">
+      <h2>Filmes favoritados</h2>
+      <p id="sem-favoritos" class="status" hidden>Nenhum filme favoritado ainda.</p>
+      <div id="lista-favoritos" class="grade-filmes"></div>
+    </section>
+  </main>
+
+  <template id="modelo-card-favorito">
+    <article class="card-filme card-favorito">
+      <img class="poster" alt="">
+      <div class="conteudo-card">
+        <h2 class="titulo-filme"></h2>
+      </div>
+    </article>
+  </template>
+
+  <script src="js/perfil.js"></script>
+</body>
+</html>

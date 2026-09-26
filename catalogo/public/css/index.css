@@ -602,3 +602,64 @@ button:hover {
   padding: 3px 8px;
   border-radius: 999px;
 }
+
+.cabecalho-perfil {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.avatar-wrapper {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  flex-shrink: 0;
+}
+
+.avatar-foto {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.botao-trocar-foto {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  background: #222;
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.info-perfil {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.bio-texto {
+  max-width: 40ch;
+  color: #555;
+}
+
+.form-bio {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 40ch;
+}
+
+.form-bio textarea {
+  resize: vertical;
+  min-height: 4rem;
+}
+
+.card-favorito {
+  cursor: default;
+}
