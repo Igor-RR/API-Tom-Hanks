@@ -42,6 +42,8 @@ services:
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
     restart: unless-stopped
+    ports:
+      - "3900:3900"
 
   profile-service:
     build: ./upload-profile/profile-service
