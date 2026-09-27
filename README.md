@@ -2,7 +2,7 @@
 
 Aplicação web de catálogo de filmes com Tom Hanks, consumindo a API do [TMDB](https://www.themoviedb.org/documentation/api) em tempo real. Usuários podem se cadastrar, fazer login, favoritar filmes, comentar e montar suas próprias tier lists — tudo isolado por conta, com persistência em MariaDB.
 
-A aplicação é dividida em **três serviços independentes**: um catálogo público, um serviço de autenticação isolado e um serviço de log de auditoria isolado — os dois últimos não são acessíveis diretamente pela internet. O controle de acesso segue o modelo **RBAC** (Role-Based Access Control), com 5 papéis hierárquicos e permissões crescentes.
+A aplicação é dividida em **quatro serviços independentes**: um catálogo público, um serviço de autenticação isolado, um serviço de log de auditoria isolado e um serviço de perfil/upload de foto isolado — os três últimos não são acessíveis diretamente pela internet. O controle de acesso segue o modelo **RBAC** (Role-Based Access Control), com 5 papéis hierárquicos e permissões crescentes.
 
 Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 
@@ -22,6 +22,7 @@ Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 - Isolamento total de dados entre contas diferentes — cada usuário só acessa seus próprios favoritos e comentários
 - Limite de requisições (rate limiting) em rotas sensíveis e de escrita, para reduzir risco de força bruta e sobrecarga do banco
 - **Log de auditoria**: login, logout, favoritar, comentar, apagar comentário (moderação) e toda tentativa de ação negada por permissão (`403`) são registrados num serviço próprio, consultável apenas por `admin` (ver seção [Log de auditoria (log-service)](#log-de-auditoria-log-service))
+- **Página de perfil**: nome, foto, bio curta e a lista de filmes já favoritados — cada usuário edita só o próprio perfil, nunca o de outro, mesmo forjando um id diferente na requisição (ver seção [Perfil de usuário e upload de foto (profile-service)](#perfil-de-usuário-e-upload-de-foto-profile-service))
 
 ## Controle de acesso (RBAC)
 
@@ -84,6 +85,18 @@ O `log-service`, por sua vez, **não participa** dessa decisão de autorização
 https://github.com/Igor-RR/API-Tom-Hanks/actions/runs/35413640888
 ![alt text](test-pictures/tag-github-actions.png)
 
+- **Perfil com a foto de upload aparecendo de verdade** (URL pré-assinada do Garage, não um placeholder):
+![alt text](test-pictures/teste-perfil-foto-upload.png)
+
+- **Tentativa (recusada) de editar o perfil de outro usuário** — o id forjado no corpo da requisição é ignorado; quem editou foi o próprio dono do token, nunca o usuário alvo:
+![alt text](test-pictures/teste-perfil-edicao-recusada.png)
+
+- **Sem foto de perfil**
+![alt text](test-pictures/perfil-sem-foto.jpeg)
+
+- **Com fot de perfil** Demonstração do sistem de upload de foto de perfil
+![alt text](test-pictures/perfil-com-foto.jpeg.jpg)
+
 ## Arquitetura
 
 ```
@@ -96,12 +109,21 @@ Navegador → catálogo (único ponto público)
                 │         ├── MariaDB (usuários, reset_tokens)
                 │         └── SMTP (Gmail SMTP)
                 │
-                └── log-service (rede interna do Docker, sem porta pública)
+                ├── log-service (rede interna do Docker, sem porta pública)
+                │         │
+                │         └── Redis (Streams)
+                │
+                └── profile-service (rede interna do Docker, sem porta pública)
                           │
-                          └── Redis (Streams)
+                          ├── MariaDB (perfis)
+                          └── Garage (rede interna p/ upload; porta 3900 publicada
+                                       só p/ o navegador ler a foto via URL assinada)
+
+Navegador ─────────────────────────────────────────────────┘
+   (acesso direto, só pra baixar a imagem via URL pré-assinada — nunca pro upload)
 ```
 
-O `catalogo` é o único serviço com porta publicada. Toda autenticação (login, cadastro, papéis, recuperação de senha) é isolada no `auth-service`, e todo o log de auditoria é isolado no `log-service` — ambos acessíveis apenas pela rede interna do Docker, pelo nome do serviço (`http://auth-service:<porta>` e `http://log-service:<porta>`). O `catalogo` nunca acessa a tabela de usuários diretamente — ele repassa as requisições de auth via HTTP interno e, no login, recebe de volta um JWT assinado pelo `auth-service`, que passa a guardar como cookie httpOnly no navegador do usuário. Da mesma forma, nem o `catalogo` nem o `auth-service` acessam o Redis diretamente — ambos disparam eventos de auditoria via HTTP interno ao `log-service`, que é o único que fala com o Redis.
+O `catalogo` é o único serviço com porta publicada pra fins de API/aplicação. Toda autenticação (login, cadastro, papéis, recuperação de senha) é isolada no `auth-service`, todo o log de auditoria é isolado no `log-service`, e toda a bio/foto de perfil é isolada no `profile-service` — os três acessíveis apenas pela rede interna do Docker, pelo nome do serviço (`http://auth-service:<porta>`, `http://log-service:<porta>`, `http://profile-service:<porta>`). O `catalogo` nunca acessa a tabela de usuários diretamente — ele repassa as requisições de auth via HTTP interno e, no login, recebe de volta um JWT assinado pelo `auth-service`, que passa a guardar como cookie httpOnly no navegador do usuário. Da mesma forma, nem o `catalogo` nem o `auth-service` acessam o Redis diretamente — ambos disparam eventos de auditoria via HTTP interno ao `log-service`, que é o único que fala com o Redis. O Garage é a única exceção à regra de "nada acessível de fora": a porta da API S3 (`3900`) é publicada de propósito, porque URLs pré-assinadas só funcionam se o navegador conseguir abri-las diretamente — isso não expõe as fotos publicamente, o bucket continua privado e o Garage recusa qualquer requisição sem assinatura válida (ver seção [Perfil de usuário e upload de foto (profile-service)](#perfil-de-usuário-e-upload-de-foto-profile-service)).
 
 ## Log de auditoria (log-service)
 
@@ -169,6 +191,72 @@ docker compose exec redis redis-cli
 XRANGE logs:eventos - +
 ```
 
+## Perfil de usuário e upload de foto (profile-service)
+
+Um quarto microsserviço, **isolado** dos outros três (mesmo padrão do `log-service`), responsável só pela bio e pela foto de perfil de cada usuário. O upload passa por **Garage**, um object storage S3-compatível, open source e self-hosted.
+
+### Por que a foto não vai pro MariaDB
+
+Dá pra guardar um arquivo binário numa coluna `BLOB`, mas isso é evitado na prática: banco relacional é otimizado pra linhas pequenas e consultas estruturadas, não pra arquivos de alguns megabytes — cada imagem guardada assim infla o banco, deixa o backup mais pesado e mais lento, e não escala bem.
+
+Em vez disso, upload é uma ação, duas gravações separadas: o arquivo em si vai pro Garage (bucket `avatars`), e só a **referência** (a chave do objeto) vai pro MariaDB, na tabela `perfis`. Exibir a foto depois é ler essa referência e montar uma URL a partir dela — o backend nunca lê o binário do banco, porque o binário nunca esteve lá.
+
+O `profile-service` valida antes de aceitar qualquer upload:
+- **Tipo do arquivo**: lido pelos primeiros bytes do próprio arquivo (magic numbers, via `file-type`), nunca pelo `Content-Type` declarado no formulário nem pela extensão do nome original — os dois são fáceis de forjar. Só `image/jpeg`, `image/png` e `image/webp` são aceitos.
+- **Tamanho máximo**: `PROFILE_IMAGE_MAX_SIZE_MB` (padrão 5MB), reforçado pelo `multer` antes do arquivo ser lido por inteiro.
+
+### Exibir a imagem de volta: bucket público vs. URL pré-assinada
+
+**Decisão: URL pré-assinada, com expiração de 5 minutos (`PRESIGNED_URL_EXPIRATION_SECONDS`).**
+
+| | Bucket público | URL pré-assinada (escolhido) |
+|---|---|---|
+| Simplicidade | Mais simples: URL fixa, cacheável | Precisa gerar uma URL nova a cada exibição do perfil |
+| Controle de acesso | Qualquer um com a URL acessa pra sempre, mesmo depois de trocar/apagar a foto | Expira sozinha; revogar acesso é só rotacionar a chave do Garage |
+| Consistência com o projeto | — | Bate com o padrão já usado aqui: nada fica exposto por padrão (`auth-service`/`log-service` sem porta pública, log restrito a admin) |
+| Custo | Nenhum | Uma assinatura HTTP local por visualização (sem chamada de rede extra) — desprezível |
+
+Trade-off aceito: a URL muda a cada resposta do backend, então não é cacheável nem "compartilhável" permanentemente — mas, pra foto de perfil de rede social pequena, isso é preferível a deixar um bucket inteiro de fotos de usuários acessível publicamente pra sempre por qualquer pessoa que descubra ou vaze uma URL antiga.
+
+**Detalhe de infraestrutura que essa decisão exige:** quem faz upload é o servidor (rede interna do Docker), mas quem *exibe* a imagem depois é o navegador do usuário (rede externa) — os dois precisam de um endereço diferente pra falar com o mesmo Garage. Por isso o `profile-service` usa dois clients S3:
+- um **interno** (`GARAGE_ENDPOINT=http://garage:3900`), só pra upload/exclusão, servidor-a-servidor, nunca sai da rede do Docker;
+- um **público** (`GARAGE_PUBLIC_ENDPOINT`), só pra *gerar* a URL assinada que o navegador vai abrir diretamente — precisa ser um host alcançável de fora do container (em dev, `http://localhost:3900`; em produção, o IP/domínio público do servidor).
+
+Isso exige publicar a porta 3900 do Garage no host (`ports: - "3900:3900"` no `docker-compose.yml`) — só essa, nunca a porta administrativa (3903) nem a de RPC interno (3901). Publicar essa porta **não torna as fotos públicas**: sem uma assinatura válida na URL, o Garage recusa a requisição do mesmo jeito, porque o bucket continua privado — é o mesmo modelo de um bucket S3 real da AWS, que também está "na internet", só que protegido por assinatura, não por rede.
+
+### Cada um só edita o próprio perfil
+
+Reaproveita o mesmo JWT em cookie httpOnly da atividade 4. As rotas de edição no `catalogo` (`PUT /api/perfil`, `POST /api/perfil/foto`) **não recebem nenhum id de usuário do cliente** — nem na URL, nem no corpo da requisição. O alvo da edição é sempre `req.usuario.usuario_id`, extraído do JWT assinado pelo `auth-service` e decodificado pelo mesmo middleware `exigirLogin` usado no resto do catálogo. Não existe um campo `usuarioId` no formulário/JSON que o front envia pra essas rotas — mesmo que alguém edite a requisição manualmente e tente incluir um id diferente no corpo, esse campo é simplesmente ignorado, porque o backend nunca lê id nenhum do `req.body` nessas rotas.
+
+Já o `GET /api/perfil/:id` (ver perfil de outro usuário) é só leitura — mesmo padrão já usado na tier list ("qualquer logado pode visualizar, só o dono edita o seu").
+
+**Limite de confiança interno:** o `profile-service`, assim como o `log-service`, nunca decodifica JWT — ele confia que o `usuarioId` que recebe na URL é legítimo porque só o `catalogo` consegue alcançá-lo (sem porta publicada) e o `catalogo` já validou a identidade antes de chamar.
+
+### Nome denormalizado — limitação conhecida
+
+O `catalogo` nunca acessa a tabela `usuarios` diretamente, então o nome de **outra** pessoa só existe se já tiver sido copiado pra tabela `perfis` antes (mesmo padrão já usado em `tier_list.usuario_nome`). Isso é sincronizado toda vez que o dono do perfil abre a própria página. Quem nunca visitou o próprio perfil ainda aparece com nome vazio para quem visita por `id` — aceito pelo mesmo motivo que a fila em memória do `log-service` é documentada como limitação conhecida, em vez de escondida.
+
+### Endpoints
+
+**profile-service** (interno, sem porta publicada):
+- `GET /perfis/:usuarioId` — nome + bio + URL assinada da foto atual
+- `PATCH /perfis/:usuarioId/nome` — sincroniza só o nome (denormalizado a partir do JWT)
+- `PUT /perfis/:usuarioId` — cria/atualiza a bio (até 280 caracteres)
+- `POST /perfis/:usuarioId/foto` — recebe a imagem, valida, sobe pro Garage e substitui a foto anterior
+
+**catálogo** (público, protegido por `exigirLogin`):
+- `GET /api/perfil/me` — perfil do próprio usuário logado
+- `GET /api/perfil/:id` — perfil público de qualquer usuário (só leitura)
+- `PUT /api/perfil` — edita a bio do próprio perfil
+- `POST /api/perfil/foto` — envia a foto do próprio perfil (`multipart/form-data`, campo `foto`)
+
+### Demonstração
+
+1. Logar e abrir `/perfil.html` → nome e favoritos (já existentes desde a atividade 2) aparecem, foto mostra as iniciais do nome (ainda sem upload)
+2. Clicar no ícone de câmera sobre o avatar, enviar uma imagem → a foto sobe pro Garage, a referência é salva em `perfis.foto_key`, e a imagem exibida na volta já vem de uma URL pré-assinada (confirmável na aba Network do DevTools: a requisição da imagem vai pra `GARAGE_PUBLIC_ENDPOINT`, com uma query string de assinatura `X-Amz-Signature=...`)
+3. Tentar enviar um arquivo que não é imagem (ex: `.pdf` renomeado pra `.png`) → recusado com `415`, porque a validação lê os bytes reais do arquivo, não a extensão
+4. Logado como usuário A, tentar forjar o id de outro usuário numa requisição de edição de perfil → o perfil de **A** é o único afetado; o id forjado no corpo é ignorado, porque o backend nunca lê id nenhum do cliente nessas rotas
+
 ## Stack
 
 - **Backend:** Node.js + Express
@@ -178,6 +266,7 @@ XRANGE logs:eventos - +
 - **API externa:** TMDB (The Movie Database)
 - **Autenticação:** JWT (`jsonwebtoken`) em cookie httpOnly (`cookie-parser`, no catálogo) + bcrypt + crypto (no auth-service)
 - **E-mail transacional:** Gmail SMTP
+- **Object storage (foto de perfil):** Garage (self-hosted, compatível com S3), isolado no `profile-service`
 - **Deploy:** Docker + Docker Hub + Docker Compose + Portainer
 
 ## Estrutura do projeto
@@ -197,12 +286,12 @@ XRANGE logs:eventos - +
 ├── .env.example
 ├── README.md
 │
-├── catalogo/                   # container público — filmes, favoritos, comentários, tier lists, planos
+├── catalogo/                   # container público — filmes, favoritos, comentários, tier lists, planos, perfil
 │   ├── Dockerfile
 │   ├── package.json
 │   ├── server.js
 │   ├── db.js
-│   ├── routes.js
+│   ├── routes.js               # inclui as rotas de perfil (proxy pro profile-service)
 │   ├── logClient.js            # dispara eventos de auditoria pro log-service (fire-and-forget)
 │   └── public/
 │       ├── login.html
@@ -213,6 +302,7 @@ XRANGE logs:eventos - +
 │       ├── tier-list.html            # índice: cards de cada stalker
 │       ├── tier-list-detalhe.html    # tier list individual, visual tradicional (fileiras S/A/B/C/D)
 │       ├── planos.html
+│       ├── perfil.html
 │       ├── css/index.css
 │       └── js/
 │           ├── login.js
@@ -222,7 +312,8 @@ XRANGE logs:eventos - +
 │           ├── redefinir-senha.js
 │           ├── tier-list.js
 │           ├── tier-list-detalhe.js
-│           └── planos.js
+│           ├── planos.js
+│           └── perfil.js
 │
 ├── auth-service/               # container interno, sem porta publicada
 │   ├── Dockerfile
@@ -232,13 +323,29 @@ XRANGE logs:eventos - +
 │   ├── logClient.js            # dispara eventos de auditoria pro log-service (fire-and-forget)
 │   └── routes.js                # cadastro, login (emite JWT), esqueci-senha, redefinir-senha
 │
-└── log-service/                # container interno, sem porta publicada
-    ├── Dockerfile
-    ├── package.json
-    ├── server.js
-    ├── routes.js                # POST /eventos, GET /eventos, GET /fila/status
-    ├── queue.js                 # fila em memória + worker que grava no Redis em background
-    └── redisClient.js
+├── log-service/                # container interno, sem porta publicada
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── server.js
+│   ├── routes.js                # POST /eventos, GET /eventos, GET /fila/status
+│   ├── queue.js                 # fila em memória + worker que grava no Redis em background
+│   └── redisClient.js
+│
+└── upload-profile/             # object storage (Garage) + microsserviço de perfil
+    ├── garage/
+    │   ├── garage.toml          # não versionado com segredos reais — ver .gitignore
+    │   └── init-garage.sh       # bootstrap idempotente: layout do cluster, bucket, chave de acesso
+    │
+    └── profile-service/         # container interno, sem porta publicada
+        ├── Dockerfile
+        ├── package.json
+        ├── server.js
+        ├── db.js                # só acessa a tabela `perfis`
+        ├── garageClient.js       # upload/exclusão (client interno) e URL assinada (client público)
+        ├── logClient.js          # dispara eventos de auditoria pro log-service (fire-and-forget)
+        ├── routes.js             # GET/PUT/PATCH/POST /perfis/:usuarioId(/nome|/foto)
+        └── middleware/
+            └── upload.js         # multer + validação real do tipo de arquivo (magic bytes)
 ```
 
 ## Como rodar localmente
@@ -249,7 +356,7 @@ XRANGE logs:eventos - +
 - Chave de API do TMDB ([obter aqui](https://www.themoviedb.org/settings/api)) — requer criar conta na plataforma
 - Conta no Google para @gmail.com
 
-O Redis usado pelo `log-service` **não precisa ser provisionado à parte** — sobe junto com os demais serviços pelo próprio `docker-compose.yml`.
+O Redis usado pelo `log-service` e o Garage usado pelo `profile-service` **não precisam ser provisionados à parte** — sobem junto com os demais serviços pelo próprio `docker-compose.yml`. O Garage, diferente do Redis, exige um passo manual de bootstrap na primeira vez (ver abaixo).
 
 ### Passo a passo
 
@@ -266,12 +373,20 @@ O Redis usado pelo `log-service` **não precisa ser provisionado à parte** — 
 
 3. Crie as tabelas no seu banco MariaDB (veja o SQL abaixo). O `log-service` não usa MariaDB, então não há schema adicional para ele.
 
-4. Suba os serviços com Docker Compose:
+4. Suba o Garage primeiro, sozinho, pra rodar o bootstrap antes do resto da stack:
+   ```bash
+   docker compose up -d garage
+   chmod +x upload-profile/garage/init-garage.sh
+   ./upload-profile/garage/init-garage.sh
+   ```
+   O script cria o layout do cluster (obrigatório mesmo com 1 nó só), o bucket `avatars` e uma chave de acesso — copie o `Key ID`/`Secret Key` exibidos no final para `GARAGE_ACCESS_KEY_ID`/`GARAGE_SECRET_ACCESS_KEY` no seu `.env`. É idempotente, só precisa ser rodado uma vez por instância do Garage (rodar de novo não quebra nada, mas também não gera credenciais novas).
+
+5. Suba o restante dos serviços com Docker Compose:
    ```bash
    docker compose up --build
    ```
 
-5. Acesse `http://localhost:3000` (porta do serviço `catalogo` — o `auth-service` e o `log-service` não são acessíveis diretamente, por padrão de arquitetura).
+6. Acesse `http://localhost:3000` (porta do serviço `catalogo` — o `auth-service`, o `log-service` e o `profile-service` não são acessíveis diretamente, por padrão de arquitetura; só a porta 3900 do Garage é publicada, e só pra servir as fotos via URL assinada).
 
 ### Schema do banco
 
@@ -328,6 +443,17 @@ CREATE TABLE tier_list (
   FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
   UNIQUE (usuario_id, tmdb_movie_id)
 );
+
+-- tabela própria do profile-service (não é acessada pelo catalogo nem pelo auth-service
+-- diretamente) -- nome é uma cópia denormalizada, mesmo princípio de tier_list.usuario_nome
+CREATE TABLE perfis (
+  usuario_id     INT PRIMARY KEY,
+  nome           VARCHAR(100) NULL,
+  bio            VARCHAR(280) NULL,
+  foto_key       VARCHAR(255) NULL,
+  atualizado_em  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
 ```
 
 ### Promovendo um usuário
@@ -362,12 +488,21 @@ Uma conta `admin` herda todos os recursos de `stalker` e, além disso, é a úni
 | `PORT_LOG` | log-service | Porta interna em que o log-service escuta |
 | `REDIS_HOST` | log-service | Host do Redis (nome do serviço no Docker Compose) |
 | `REDIS_PORT` | log-service | Porta do Redis |
-| `DB_HOST` | catálogo, auth-service | Endereço do servidor MariaDB |
-| `DB_USER` | catálogo, auth-service | Usuário do banco |
-| `DB_PASSWORD` | catálogo, auth-service | Senha do usuário do banco |
-| `DB_NAME` | catálogo, auth-service | Nome do banco de dados |
+| `DB_HOST` | catálogo, auth-service, profile-service | Endereço do servidor MariaDB |
+| `DB_USER` | catálogo, auth-service, profile-service | Usuário do banco |
+| `DB_PASSWORD` | catálogo, auth-service, profile-service | Senha do usuário do banco |
+| `DB_NAME` | catálogo, auth-service, profile-service | Nome do banco de dados |
+| `PORT_PROFILE` | profile-service | Porta interna em que o profile-service escuta |
+| `PROFILE_SERVICE_URL` | catálogo | URL interna do profile-service (ex: `http://profile-service:4100`) |
+| `GARAGE_ENDPOINT` | profile-service | Endpoint interno do Garage, só pra upload/exclusão (`http://garage:3900`) |
+| `GARAGE_PUBLIC_ENDPOINT` | profile-service | Endpoint alcançável pelo navegador, só pra gerar a URL assinada de leitura (`http://localhost:3900` em dev; domínio/IP público em produção) |
+| `GARAGE_REGION` | profile-service | Região configurada no `garage.toml` (`garage`) |
+| `GARAGE_BUCKET` | profile-service | Bucket dedicado às fotos de perfil (`avatars`) |
+| `GARAGE_ACCESS_KEY_ID` / `GARAGE_SECRET_ACCESS_KEY` | profile-service | Credenciais geradas por `upload-profile/garage/init-garage.sh` |
+| `PROFILE_IMAGE_MAX_SIZE_MB` | profile-service | Tamanho máximo aceito por upload (padrão 5MB) |
+| `PRESIGNED_URL_EXPIRATION_SECONDS` | profile-service | Validade da URL assinada gerada pra exibir a foto (padrão 300s) |
 
-Localmente, os três serviços leem o mesmo arquivo `.env` na raiz (o Docker Compose resolve automaticamente os `${...}` do `docker-compose.yml` a partir dele). Em produção (Portainer), os mesmos pares chave-valor são cadastrados na tela de *Environment variables* da stack. O `log-service` não usa `DB_HOST`/`DB_USER`/etc. — ele não acessa o MariaDB.
+Localmente, os serviços leem o mesmo arquivo `.env` na raiz (o Docker Compose resolve automaticamente os `${...}` do `docker-compose.yml` a partir dele). Em produção (Portainer), os mesmos pares chave-valor são cadastrados na tela de *Environment variables* da stack. O `log-service` não usa `DB_HOST`/`DB_USER`/etc. — ele não acessa o MariaDB.
 
 ## Segurança
 
@@ -385,6 +520,10 @@ Localmente, os três serviços leem o mesmo arquivo `.env` na raiz (o Docker Com
 - A rota de "esqueci minha senha" sempre responde a mesma mensagem, exista ou não o e-mail informado, evitando enumeração de contas cadastradas
 - Chamadas de auditoria (`catalogo`/`auth-service` → `log-service`) são fire-and-forget: uma falha no log nunca bloqueia nem reverte a ação principal do usuário
 - Variáveis sensíveis configuradas via ambiente (`.env` local, nunca commitado; ou na tela de variáveis da stack no Portainer), jamais expostas no `Dockerfile` ou no código do cliente
+- As rotas de edição de perfil (`PUT /api/perfil`, `POST /api/perfil/foto`) nunca recebem id de usuário do cliente — o alvo é sempre `req.usuario.usuario_id`, extraído do JWT; um id forjado no corpo da requisição é simplesmente ignorado, não apenas rejeitado
+- Upload de foto de perfil é validado pelos bytes reais do arquivo (`file-type`), não pelo `Content-Type` declarado nem pela extensão do nome — os dois são fáceis de forjar
+- O bucket de fotos no Garage é privado; a exibição usa URL pré-assinada com expiração curta (`PRESIGNED_URL_EXPIRATION_SECONDS`) em vez de leitura pública permanente — ver trade-off detalhado na seção do profile-service
+- O `profile-service` é interno como o `log-service`: não decodifica JWT, confia na identidade que o `catalogo` já validou antes de chamá-lo, e não é acessível de fora da rede do Docker
 
 ## CI/CD
 
@@ -404,6 +543,8 @@ Depois de subir:
 3. Faz login real via `POST /api/auth/login`, checando o status HTTP e o corpo de cada resposta
 
 Se qualquer uma dessas chamadas não retornar o status esperado, o job falha — e o Job 2 nunca roda. Não há mock nem API fake nesse teste: é o código de produção rodando de ponta a ponta contra um banco de dados de verdade (só que descartável, recriado do zero a cada execução).
+
+**Observação:** o `profile-service` e o Garage ainda não fazem parte deste job — só `catalogo` e `auth-service` são testados de ponta a ponta pelo pipeline por enquanto. Upload de foto continua validado manualmente (ver seção do profile-service).
 
 As variáveis não relacionadas ao banco (`JWT_SECRET`, `AUTH_SERVICE_URL`, `LOG_SERVICE_URL`, `PORT_*`, etc.) vêm de `.github/ci/.env.ci`, copiado para `.env` no início do job — necessário porque o runner do GitHub Actions é uma máquina limpa, sem nenhum `.env` local; sem esse arquivo, essas variáveis chegariam como `undefined` dentro dos containers. `TMDB_API_KEY` e as `SMTP_*` recebem valores fake nesse arquivo, já que o teste de cadastro/login não depende de nenhum dos dois serviços externos, e não faria sentido commitar uma credencial real só para isso. O `.env.ci` é seguro para versionar — ao contrário do `.env` real, não contém nenhum segredo de produção.
 
@@ -437,6 +578,8 @@ docker compose push
 
 Em condições normais de desenvolvimento, isso é feito automaticamente pelo pipeline de CI/CD (ver seção acima) a cada push na `main` — este processo manual continua documentado aqui para builds pontuais ou depuração local.
 
+
+
 ### Subindo no Portainer
 
 No Portainer, a stack usa as imagens já publicadas no Docker Hub (sem `build:`, já que o servidor não tem acesso ao código-fonte diretamente):
@@ -453,6 +596,7 @@ services:
       - TMDB_API_KEY=${TMDB_API_KEY}
       - AUTH_SERVICE_URL=${AUTH_SERVICE_URL}
       - LOG_SERVICE_URL=${LOG_SERVICE_URL}
+      - PROFILE_SERVICE_URL=${PROFILE_SERVICE_URL}
       - DB_HOST=${DB_HOST}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
@@ -460,6 +604,7 @@ services:
     depends_on:
       - auth-service
       - log-service
+      - profile-service
 
   auth-service:
     image: igorrueda/api-tom-hanks-microserv-auth-service:latest
@@ -498,14 +643,49 @@ services:
       - redis
     restart: unless-stopped
 
+  garage:
+    image: dxflrs/garage:v2.0.0
+    ports:
+      - "3900:3900"   # só a API S3 -- o navegador precisa alcançar essa pra ver as fotos
+    volumes:
+      - ./upload-profile/garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    restart: unless-stopped
+
+  profile-service:
+    image: igorrueda/api-tom-hanks-microserv-profile-service:latest
+    environment:
+      - PORT_PROFILE=${PORT_PROFILE}
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - GARAGE_ENDPOINT=${GARAGE_ENDPOINT}
+      - GARAGE_PUBLIC_ENDPOINT=${GARAGE_PUBLIC_ENDPOINT}
+      - GARAGE_REGION=${GARAGE_REGION}
+      - GARAGE_BUCKET=${GARAGE_BUCKET}
+      - GARAGE_ACCESS_KEY_ID=${GARAGE_ACCESS_KEY_ID}
+      - GARAGE_SECRET_ACCESS_KEY=${GARAGE_SECRET_ACCESS_KEY}
+      - PROFILE_IMAGE_MAX_SIZE_MB=${PROFILE_IMAGE_MAX_SIZE_MB}
+      - PRESIGNED_URL_EXPIRATION_SECONDS=${PRESIGNED_URL_EXPIRATION_SECONDS}
+      - LOG_SERVICE_URL=${LOG_SERVICE_URL}
+    depends_on:
+      - garage
+    restart: unless-stopped
+
 volumes:
   redis-data:
+  garage-meta:
+  garage-data:
 ```
 
 Pontos importantes:
-- **Apenas o `catalogo` tem `ports:`** — o `auth-service` e o `log-service` nunca devem expor porta ao host, é isso que garante seu isolamento da internet.
-- **`JWT_SECRET` precisa ser exatamente igual no `catalogo` e no `auth-service`** — é essa chave compartilhada que permite ao catálogo validar um token assinado pelo auth-service, sem consultá-lo a cada requisição. O `log-service` não usa `JWT_SECRET` — ele nunca decodifica token, só recebe eventos já autorizados pelo catálogo.
+- **`catalogo` e `garage` são os únicos com `ports:`** — o `auth-service`, o `log-service` e o `profile-service` nunca devem expor porta ao host, é isso que garante seu isolamento da internet. A porta do `garage` é uma exceção deliberada (ver seção do profile-service): só a 3900 (API S3), nunca a 3901/3903.
+- **`JWT_SECRET` precisa ser exatamente igual no `catalogo` e no `auth-service`** — é essa chave compartilhada que permite ao catálogo validar um token assinado pelo auth-service, sem consultá-lo a cada requisição. O `log-service` e o `profile-service` não usam `JWT_SECRET` — nenhum dos dois decodifica token, só recebem chamadas já autorizadas pelo catálogo.
 - **A tela de "Environment variables" da stack, sozinha, não injeta nada nos containers** — ela só disponibiliza valores para os `${...}` referenciados dentro do `environment:` de cada serviço no compose. Sem esse `environment:` explícito, os valores cadastrados na stack são ignorados pelos containers.
-- **O volume `redis-data` garante persistência do stream em disco** entre reinicializações do container do Redis (`--appendonly yes`) — sem ele, um restart do container do Redis apagaria todo o histórico de auditoria já gravado.
+- **O volume `redis-data` garante persistência do stream em disco** entre reinicializações do container do Redis (`--appendonly yes`) — sem ele, um restart do container do Redis apagaria todo o histórico de auditoria já gravado. Da mesma forma, `garage-meta`/`garage-data` garantem que as fotos e o estado do cluster sobrevivam a um restart do container do Garage.
+- **`GARAGE_PUBLIC_ENDPOINT` em produção precisa ser o IP/domínio público do servidor**, nunca `http://garage:3900` — esse nome só resolve dentro da rede interna do Docker; o navegador do usuário não o alcança.
+- **O bootstrap do Garage (`init-garage.sh`) precisa ser rodado contra a instância de produção**, não a local — cada instância do Garage tem seu próprio estado interno, então a chave gerada localmente não é reconhecida pelo Garage rodando no servidor.
 - Após qualquer mudança de código, é necessário `docker compose build && docker compose push` local, seguido de **"Re-pull image and redeploy"** na stack do Portainer.
 - Após qualquer mudança apenas nas variáveis de ambiente ou no `docker-compose.yml` (sem mudança de código), basta **"Update the stack"** no Portainer.
