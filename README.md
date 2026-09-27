@@ -85,17 +85,15 @@ O `log-service`, por sua vez, **não participa** dessa decisão de autorização
 https://github.com/Igor-RR/API-Tom-Hanks/actions/runs/35413640888
 ![alt text](test-pictures/tag-github-actions.png)
 
+- **Sem foto de perfil**
+![alt text](test-pictures/perfil-sem-foto.jpeg)
+
 - **Perfil com a foto de upload aparecendo de verdade** (URL pré-assinada do Garage, não um placeholder):
-![alt text](test-pictures/teste-perfil-foto-upload.png)
+![alt text](test-pictures/perfil-com-foto.jpeg)
 
 - **Tentativa (recusada) de editar o perfil de outro usuário** — o id forjado no corpo da requisição é ignorado; quem editou foi o próprio dono do token, nunca o usuário alvo:
 ![alt text](test-pictures/teste-perfil-edicao-recusada.png)
 
-- **Sem foto de perfil**
-![alt text](test-pictures/perfil-sem-foto.jpeg)
-
-- **Com fot de perfil** Demonstração do sistem de upload de foto de perfil
-![alt text](test-pictures/perfil-com-foto.jpeg.jpg)
 
 ## Arquitetura
 
