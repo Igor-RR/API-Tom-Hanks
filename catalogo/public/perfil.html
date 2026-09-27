@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Perfil — Tom Hanks</title>
   <link rel="stylesheet" href="css/index.css">
-  <link rel="stylesheet" href="css/perfil.css">
 </head>
 <body class="pagina-perfil">
   <header class="topo">
@@ -17,32 +16,64 @@
     </div>
   </header>
 
-  <main>
+  <main class="conteudo-perfil">
     <p id="mensagem-status" class="status" hidden></p>
 
-    <section id="cabecalho-perfil" class="cabecalho-perfil" hidden>
-      <div class="avatar-wrapper">
-        <img id="avatar-foto" class="avatar-foto" alt="Foto de perfil">
-        <label id="label-trocar-foto" for="input-foto" class="botao-trocar-foto" hidden>Trocar foto</label>
-        <input type="file" id="input-foto" accept="image/jpeg,image/png,image/webp" hidden>
-      </div>
+    <section id="cartao-perfil" class="cartao-perfil" hidden>
+      <div class="banner-perfil"></div>
 
-      <div class="info-perfil">
-        <h2 id="nome-usuario"></h2>
+      <div class="corpo-cartao-perfil">
+        <div class="avatar-wrapper">
+          <div id="avatar-iniciais" class="avatar-iniciais" hidden></div>
+          <img id="avatar-foto" class="avatar-foto" alt="Foto de perfil" hidden>
+
+          <label id="label-trocar-foto" for="input-foto" class="botao-avatar" hidden aria-label="Trocar foto de perfil" title="Trocar foto de perfil">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"></path>
+              <circle cx="12" cy="13" r="3.5"></circle>
+            </svg>
+          </label>
+          <input type="file" id="input-foto" accept="image/jpeg,image/png,image/webp" hidden>
+        </div>
+
+        <div class="linha-nome">
+          <h2 id="nome-usuario"></h2>
+          <button id="btn-editar-bio" class="botao-editar-bio" hidden aria-label="Editar bio" title="Editar bio">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"></path>
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+            </svg>
+            <span>Editar bio</span>
+          </button>
+        </div>
 
         <p id="bio-texto" class="bio-texto"></p>
+        <p id="erro-foto" class="erro-inline" hidden></p>
 
         <form id="form-bio" class="form-bio" hidden>
           <textarea id="input-bio" maxlength="280" placeholder="Escreva uma bio curta..."></textarea>
-          <button type="submit">Salvar bio</button>
+          <div class="form-bio-rodape">
+            <span id="contador-bio" class="contador-bio">0/280</span>
+            <div class="form-bio-botoes">
+              <button type="button" id="btn-cancelar-bio" class="botao-secundario">Cancelar</button>
+              <button type="submit">Salvar</button>
+            </div>
+          </div>
         </form>
-        <button id="btn-editar-bio" class="botao-secundario" hidden>Editar bio</button>
       </div>
     </section>
 
     <section class="secao-favoritos">
-      <h2>Filmes favoritados</h2>
-      <p id="sem-favoritos" class="status" hidden>Nenhum filme favoritado ainda.</p>
+      <div class="titulo-secao-favoritos">
+        <h2>Filmes favoritados</h2>
+        <span id="contagem-favoritos-perfil" class="contagem-favoritos"></span>
+      </div>
+
+      <div id="vazio-favoritos" class="vazio-favoritos" hidden>
+        <p>Nenhum filme favoritado ainda.</p>
+        <a href="catalogo.html" class="botao-secundario">Ver catálogo</a>
+      </div>
+
       <div id="lista-favoritos" class="grade-filmes"></div>
     </section>
   </main>

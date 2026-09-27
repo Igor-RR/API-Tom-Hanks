@@ -2,6 +2,14 @@
   box-sizing: border-box;
 }
 
+/* Sem isso, qualquer classe que defina "display" explicitamente (como .form-bio ou
+   .avatar-iniciais) sobrescreve o display:none padrão do atributo hidden, e o elemento
+   aparece mesmo devendo estar escondido -- foi exatamente o bug do avatar duplicado e do
+   formulário de bio sempre aberto. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -603,63 +611,258 @@ button:hover {
   border-radius: 999px;
 }
 
-.cabecalho-perfil {
+/* Estilos do perfil movidos e reformulados — ver bloco "perfil" adicionado abaixo *//* ---------- perfil ---------- */
+
+.pagina-perfil {
+  display: block;
+  align-items: unset;
+  justify-content: unset;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.conteudo-perfil {
+  max-width: 1100px;
+  margin: 0 auto;
   display: flex;
-  align-items: center;
-  gap: 1.5rem;
-  margin-bottom: 2rem;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.cartao-perfil {
+  background: #f4f7f3;
+  border: 1px solid #e3ece2;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.banner-perfil {
+  height: 96px;
+  background: linear-gradient(120deg, #8fbc8f, #dfe8de);
+}
+
+.corpo-cartao-perfil {
+  padding: 0 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .avatar-wrapper {
   position: relative;
-  width: 120px;
-  height: 120px;
-  flex-shrink: 0;
+  width: 112px;
+  height: 112px;
+  margin-top: -56px;
+  margin-bottom: 4px;
+}
+
+.avatar-foto,
+.avatar-iniciais {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  border: 4px solid #f4f7f3;
+  box-sizing: border-box;
 }
 
 .avatar-foto {
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  object-fit: cover;
   display: block;
+  object-fit: cover;
+  background: #e3ece2;
 }
 
-.botao-trocar-foto {
+.avatar-iniciais {
+  background: #8fbc8f;
+  color: #1f2e1f;
+  font-size: 2.6rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.botao-avatar {
   position: absolute;
-  bottom: 0;
-  right: 0;
-  background: #222;
-  color: #fff;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 6px;
+  bottom: 4px;
+  right: 4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #2b2f2b;
+  color: #ffffff;
+  border: 2px solid #f4f7f3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
-.info-perfil {
+.botao-avatar:hover {
+  background: #454a45;
+}
+
+.linha-nome {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.linha-nome h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.botao-editar-bio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid #cdd9cc;
+  color: #2b2f2b;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  margin-top: 0;
+}
+
+.botao-editar-bio:hover {
+  border-color: #8fbc8f;
+  background: #ffffff;
 }
 
 .bio-texto {
-  max-width: 40ch;
-  color: #555;
+  max-width: 60ch;
+  color: #555f55;
+  line-height: 1.5;
+}
+
+.erro-inline {
+  color: #c0524a;
+  font-size: 0.8rem;
+  margin: -4px 0 4px;
 }
 
 .form-bio {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  max-width: 40ch;
+  gap: 8px;
+  max-width: 60ch;
 }
 
 .form-bio textarea {
   resize: vertical;
-  min-height: 4rem;
+  min-height: 4.5rem;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #cdd9cc;
+  background: #ffffff;
+  color: #2b2f2b;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.form-bio textarea:focus {
+  outline: none;
+  border-color: #8fbc8f;
+  box-shadow: 0 0 0 3px rgba(143, 188, 143, 0.25);
+}
+
+.form-bio-rodape {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.contador-bio {
+  font-size: 0.75rem;
+  color: #6b7a6b;
+}
+
+.form-bio-botoes {
+  display: flex;
+  gap: 8px;
+}
+
+.form-bio-botoes button {
+  margin-top: 0;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+}
+
+.secao-favoritos > h2 {
+  display: none; /* título fica em .titulo-secao-favoritos, evita duplicar estilo do h1 */
+}
+
+.titulo-secao-favoritos {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.titulo-secao-favoritos h2 {
+  display: block;
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.vazio-favoritos {
+  background: #f4f7f3;
+  border: 1px dashed #cdd9cc;
+  border-radius: 10px;
+  padding: 32px;
+  text-align: center;
+  color: #6b7a6b;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.vazio-favoritos p {
+  margin: 0;
 }
 
 .card-favorito {
   cursor: default;
+}
+
+.card-favorito .conteudo-card {
+  padding: 10px 12px;
+}
+
+.card-favorito .titulo-filme {
+  font-size: 0.9rem;
+}
+
+@media (max-width: 560px) {
+  .banner-perfil {
+    height: 72px;
+  }
+
+  .avatar-wrapper {
+    width: 88px;
+    height: 88px;
+    margin-top: -44px;
+  }
+
+  .avatar-foto,
+  .avatar-iniciais {
+    width: 88px;
+    height: 88px;
+  }
+
+  .avatar-iniciais {
+    font-size: 2rem;
+  }
+
+  .corpo-cartao-perfil {
+    padding: 0 16px 20px;
+  }
 }

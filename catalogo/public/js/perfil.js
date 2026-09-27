@@ -1,22 +1,34 @@
 const mensagemStatus = document.getElementById('mensagem-status')
-const cabecalhoPerfil = document.getElementById('cabecalho-perfil')
+const cartaoPerfil = document.getElementById('cartao-perfil')
+
 const avatarFoto = document.getElementById('avatar-foto')
+const avatarIniciais = document.getElementById('avatar-iniciais')
 const labelTrocarFoto = document.getElementById('label-trocar-foto')
 const inputFoto = document.getElementById('input-foto')
+const erroFoto = document.getElementById('erro-foto')
+
 const nomeUsuario = document.getElementById('nome-usuario')
 const bioTexto = document.getElementById('bio-texto')
+
+const btnEditarBio = document.getElementById('btn-editar-bio')
 const formBio = document.getElementById('form-bio')
 const inputBio = document.getElementById('input-bio')
-const btnEditarBio = document.getElementById('btn-editar-bio')
+const contadorBio = document.getElementById('contador-bio')
+const btnCancelarBio = document.getElementById('btn-cancelar-bio')
+
 const listaFavoritos = document.getElementById('lista-favoritos')
-const semFavoritos = document.getElementById('sem-favoritos')
+const vazioFavoritos = document.getElementById('vazio-favoritos')
+const contagemFavoritosPerfil = document.getElementById('contagem-favoritos-perfil')
 const modeloCardFavorito = document.getElementById('modelo-card-favorito')
+
 const btnLogout = document.getElementById('btn-logout')
 
-const AVATAR_PADRAO = 'img/avatar-padrao.png' // troque pelo placeholder que você já tiver
+const LIMITE_BIO = 280
 
 const params = new URLSearchParams(window.location.search)
 const idPerfilVisitado = params.get('id') // ausente = próprio perfil
+
+let bioAtual = ''
 
 function mostrarStatus(texto) {
   mensagemStatus.textContent = texto
@@ -25,6 +37,15 @@ function mostrarStatus(texto) {
 
 function esconderStatus() {
   mensagemStatus.hidden = true
+}
+
+function mostrarErroFoto(texto) {
+  erroFoto.textContent = texto
+  erroFoto.hidden = false
+}
+
+function esconderErroFoto() {
+  erroFoto.hidden = true
 }
 
 // ---------- carregar o perfil ao abrir a página ----------
@@ -53,16 +74,44 @@ async function iniciar() {
   }
 }
 
-function renderizarPerfil(perfil) {
-  cabecalhoPerfil.hidden = false
+function iniciaisDoNome(nome) {
+  if (!nome) return '?'
+  const partes = nome.trim().split(/\s+/)
+  const primeira = partes[0]?.[0] || ''
+  const ultima = partes.length > 1 ? partes[partes.length - 1][0] : ''
+  return (primeira + ultima).toUpperCase()
+}
 
-  avatarFoto.src = perfil.fotoUrl || AVATAR_PADRAO
+function renderizarAvatar(fotoUrl, nome) {
+  if (fotoUrl) {
+    avatarFoto.src = fotoUrl
+    avatarFoto.hidden = false
+    avatarIniciais.hidden = true
+  } else {
+    avatarIniciais.textContent = iniciaisDoNome(nome)
+    avatarIniciais.hidden = false
+    avatarFoto.hidden = true
+  }
+}
+
+function renderizarPerfil(perfil) {
+  cartaoPerfil.hidden = false
+
+  // O backend real do catalogo usa snake_case (mesma convenção de usuario_id,
+  // tmdb_movie_id etc.), mas o profile-service devolve camelCase em alguns pontos --
+  // aceitamos os dois nomes aqui pra não depender de qual dos dois lados foi ajustado.
+  const fotoUrl = perfil.foto_url ?? perfil.fotoUrl
+  const ehProprioPerfil = perfil.eh_proprio_perfil ?? perfil.ehProprioPerfil
+
+  renderizarAvatar(fotoUrl, perfil.nome)
   nomeUsuario.textContent = perfil.nome || 'Usuário'
-  bioTexto.textContent = perfil.bio || (perfil.ehProprioPerfil ? 'Você ainda não escreveu uma bio.' : 'Sem bio.')
+
+  bioAtual = perfil.bio || ''
+  bioTexto.textContent = bioAtual || (ehProprioPerfil ? 'Você ainda não escreveu uma bio.' : 'Sem bio.')
 
   // controles de edição só aparecem no PRÓPRIO perfil -- isso é só interface; a garantia
   // real está no backend (PUT/POST usam sempre o id do JWT, nunca o :id da URL)
-  if (perfil.ehProprioPerfil) {
+  if (ehProprioPerfil) {
     labelTrocarFoto.hidden = false
     btnEditarBio.hidden = false
   }
@@ -72,12 +121,13 @@ function renderizarPerfil(perfil) {
 
 function renderizarFavoritos(favoritos) {
   listaFavoritos.innerHTML = ''
+  contagemFavoritosPerfil.textContent = favoritos.length > 0 ? `(${favoritos.length})` : ''
 
   if (favoritos.length === 0) {
-    semFavoritos.hidden = false
+    vazioFavoritos.hidden = false
     return
   }
-  semFavoritos.hidden = true
+  vazioFavoritos.hidden = true
 
   favoritos.forEach(filme => {
     const card = modeloCardFavorito.content.cloneNode(true)
@@ -89,16 +139,29 @@ function renderizarFavoritos(favoritos) {
 }
 
 // ---------- editar bio ----------
+function atualizarContadorBio() {
+  contadorBio.textContent = `${inputBio.value.length}/${LIMITE_BIO}`
+}
+
 btnEditarBio.addEventListener('click', () => {
-  inputBio.value = bioTexto.dataset.vazio === 'true' ? '' : bioTexto.textContent
+  inputBio.value = bioAtual
+  atualizarContadorBio()
   formBio.hidden = false
   btnEditarBio.hidden = true
+  inputBio.focus()
 })
+
+btnCancelarBio.addEventListener('click', () => {
+  formBio.hidden = true
+  btnEditarBio.hidden = false
+})
+
+inputBio.addEventListener('input', atualizarContadorBio)
 
 formBio.addEventListener('submit', async (evento) => {
   evento.preventDefault()
-  const botao = formBio.querySelector('button')
-  botao.disabled = true
+  const botaoSalvar = formBio.querySelector('button[type="submit"]')
+  botaoSalvar.disabled = true
 
   try {
     const resposta = await fetch('/api/perfil', {
@@ -108,16 +171,20 @@ formBio.addEventListener('submit', async (evento) => {
     })
     const dados = await resposta.json()
 
-    const semBio = !dados.bio
-    bioTexto.textContent = dados.bio || 'Você ainda não escreveu uma bio.'
-    bioTexto.dataset.vazio = String(semBio)
+    if (!resposta.ok) {
+      mostrarStatus(dados.erro || dados.mensagem || 'Não foi possível salvar a bio.')
+      return
+    }
+
+    bioAtual = dados.bio || ''
+    bioTexto.textContent = bioAtual || 'Você ainda não escreveu uma bio.'
 
     formBio.hidden = true
     btnEditarBio.hidden = false
   } catch (err) {
     mostrarStatus('Erro ao salvar a bio.')
   } finally {
-    botao.disabled = false
+    botaoSalvar.disabled = false
   }
 })
 
@@ -126,24 +193,34 @@ inputFoto.addEventListener('change', async () => {
   const arquivo = inputFoto.files[0]
   if (!arquivo) return
 
+  esconderErroFoto()
+
+  // pré-visualização otimista: mostra a foto local na hora, antes mesmo da resposta do
+  // servidor -- se der erro (tipo/tamanho inválido), a linha de baixo desfaz e volta
+  // pro estado anterior (foto antiga ou iniciais)
+  const fotoAnterior = avatarFoto.hidden ? null : avatarFoto.src
+  const preview = URL.createObjectURL(arquivo)
+  renderizarAvatar(preview, nomeUsuario.textContent)
+
   const formData = new FormData()
   formData.append('foto', arquivo)
 
-  mostrarStatus('Enviando foto...')
   try {
     const resposta = await fetch('/api/perfil/foto', { method: 'POST', body: formData })
     const dados = await resposta.json()
 
     if (!resposta.ok) {
-      mostrarStatus(dados.erro || 'Não foi possível enviar a foto.')
+      renderizarAvatar(fotoAnterior, nomeUsuario.textContent)
+      mostrarErroFoto(dados.erro || dados.mensagem || 'Não foi possível enviar a foto.')
       return
     }
 
-    avatarFoto.src = dados.fotoUrl
-    esconderStatus()
+    renderizarAvatar(dados.foto_url ?? dados.fotoUrl, nomeUsuario.textContent)
   } catch (err) {
-    mostrarStatus('Erro ao enviar a foto.')
+    renderizarAvatar(fotoAnterior, nomeUsuario.textContent)
+    mostrarErroFoto('Erro ao enviar a foto. Tente novamente.')
   } finally {
+    URL.revokeObjectURL(preview)
     inputFoto.value = ''
   }
 })
