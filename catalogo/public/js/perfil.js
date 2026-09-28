@@ -29,6 +29,7 @@ const params = new URLSearchParams(window.location.search)
 const idPerfilVisitado = params.get('id') // ausente = próprio perfil
 
 let bioAtual = ''
+let meuUsuarioId = null // preenchido quando é o próprio perfil; usado nas URLs de edição
 
 function mostrarStatus(texto) {
   mensagemStatus.textContent = texto
@@ -112,6 +113,7 @@ function renderizarPerfil(perfil) {
   // controles de edição só aparecem no PRÓPRIO perfil -- isso é só interface; a garantia
   // real está no backend (PUT/POST usam sempre o id do JWT, nunca o :id da URL)
   if (ehProprioPerfil) {
+    meuUsuarioId = perfil.usuario_id ?? perfil.usuarioId
     labelTrocarFoto.hidden = false
     btnEditarBio.hidden = false
   }
@@ -164,7 +166,7 @@ formBio.addEventListener('submit', async (evento) => {
   botaoSalvar.disabled = true
 
   try {
-    const resposta = await fetch('/api/perfil', {
+    const resposta = await fetch(`/api/perfil/${meuUsuarioId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bio: inputBio.value.trim() })
@@ -206,7 +208,7 @@ inputFoto.addEventListener('change', async () => {
   formData.append('foto', arquivo)
 
   try {
-    const resposta = await fetch('/api/perfil/foto', { method: 'POST', body: formData })
+    const resposta = await fetch(`/api/perfil/${meuUsuarioId}/foto`, { method: 'POST', body: formData })
     const dados = await resposta.json()
 
     if (!resposta.ok) {
