@@ -1,39 +1,21 @@
 const express = require('express')
 const jwt = require('jsonwebtoken')
 const rateLimit = require('express-rate-limit')
+const multer = require('multer')
 const db = require('./db')
 const { registrarEvento } = require('./logClient') // LOG: helper de auditoria
-const multer = require('multer')
+
 const router = express.Router()
 
 const AUTH_URL = process.env.AUTH_SERVICE_URL
-const LOG_URL = process.env.LOG_SERVICE_URL
-const PROFILE_URL = process.env.PROFILE_SERVICE_URL
+const LOG_URL = process.env.LOG_SERVICE_URL // LOG: usado só na rota de consulta (proxy)
+const PROFILE_URL = process.env.PROFILE_SERVICE_URL // PERFIL: profile-service (rede interna)
 const TAMANHO_MAXIMO_MB = Number(process.env.PROFILE_IMAGE_MAX_SIZE_MB || 5)
 
+// 'admin' é o nível 5, exclusivo do administrador do produto: herda tudo de
+// stalker (favoritar, comentar, moderar, tier list) e, além disso, é o único
+// que passa em exigirNivel('admin') -- usado só pela rota de log de auditoria
 const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker', 'admin']
-
-const uploadFoto = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: TAMANHO_MAXIMO_MB * 1024 * 1024 }
-})
-
-async function buscarFavoritosDoUsuario(usuarioId) {
-  const [linhas] = await db.query(
-    'SELECT tmdb_movie_id, titulo, poster_path FROM favoritos WHERE usuario_id = ?',
-    [usuarioId]
-  )
-  return linhas
-}
-
-// fire-and-forget, mesmo princípio do registrarEvento: nunca trava a resposta principal
-function sincronizarNome(usuarioId, nome) {
-  fetch(`${PROFILE_URL}/perfis/${usuarioId}/nome`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nome })
-  }).catch(err => console.error('Falha ao sincronizar nome no profile-service:', err.message))
-}
 
 function nivelDe(role) {
   return HIERARQUIA.indexOf(role)
@@ -47,7 +29,7 @@ function exigirLogin(req, res, next) {
   }
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET)
-    req.usuario = payload // { usuario_id, role }
+    req.usuario = payload // { usuario_id, nome, role }
     next()
   } catch (err) {
     return res.status(401).json({ mensagem: 'Sessão inválida ou expirada.' })
@@ -71,12 +53,35 @@ function exigirNivel(roleMinimo) {
   }
 }
 
+// PERFIL: só o dono edita o próprio perfil. Compara o :usuario_id da URL com o
+// usuario_id do JWT (nunca confia no que veio do cliente). Deve vir ANTES do
+// multer nas rotas de upload, pra não processar o arquivo de quem não pode.
+function exigirProprioPerfil(req, res, next) {
+  if (String(req.params.usuario_id) !== String(req.usuario.usuario_id)) {
+    registrarEvento({
+      usuario_id: req.usuario.usuario_id,
+      acao: 'acesso_negado',
+      ip_origem: req.ip,
+      detalhe: `rota=${req.method} ${req.originalUrl} tentou_editar_usuario_id=${req.params.usuario_id}`
+    })
+    return res.status(403).json({ mensagem: 'Você só pode editar o seu próprio perfil.' })
+  }
+  next()
+}
+
 const limitadorEscrita = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
   message: { mensagem: 'Muitas requisições. Aguarde um momento.' },
   standardHeaders: true,
   legacyHeaders: false
+})
+
+// PERFIL: o catalogo só repassa o arquivo pro profile-service, nunca grava em
+// disco nem manda pro MariaDB -- por isso memoryStorage
+const uploadFoto = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: TAMANHO_MAXIMO_MB * 1024 * 1024 }
 })
 
 // ---------- USUÁRIO LOGADO ----------
@@ -467,9 +472,28 @@ router.get('/logs', exigirLogin, exigirNivel('admin'), async (req, res) => {
   }
 })
 
-// ---------- PERFIL ----------
+// ---------- PERFIL (proxy pro profile-service) ----------
 
-// perfil do PRÓPRIO usuário logado
+async function buscarFavoritosDoUsuario(usuarioId) {
+  const [linhas] = await db.query(
+    'SELECT tmdb_movie_id, titulo, poster_path FROM favoritos WHERE usuario_id = ?',
+    [usuarioId]
+  )
+  return linhas
+}
+
+// fire-and-forget, mesmo princípio do registrarEvento: nunca trava a resposta principal.
+// O nome vem do JWT de quem está logado e é copiado pra tabela perfis (denormalizado),
+// já que o catalogo nunca acessa a tabela usuarios.
+function sincronizarNome(usuarioId, nome) {
+  fetch(`${PROFILE_URL}/perfis/${usuarioId}/nome`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome })
+  }).catch(err => console.error('Falha ao sincronizar nome no profile-service:', err.message))
+}
+
+// perfil do PRÓPRIO usuário logado (precisa vir antes de /perfil/:usuario_id)
 router.get('/perfil/me', exigirLogin, async (req, res) => {
   try {
     sincronizarNome(req.usuario.usuario_id, req.usuario.nome)
@@ -517,8 +541,9 @@ router.get('/perfil/:usuario_id', exigirLogin, async (req, res) => {
   }
 })
 
-// edita a bio do PRÓPRIO perfil -- o id nunca vem do corpo, vem de req.usuario.usuario_id
-router.put('/perfil', exigirLogin, limitadorEscrita, async (req, res) => {
+// edita a bio -- 403 se o :usuario_id não for o de quem está logado.
+// A chamada ao profile-service usa o id do JWT, nunca o da URL (segunda camada).
+router.put('/perfil/:usuario_id', exigirLogin, exigirProprioPerfil, limitadorEscrita, async (req, res) => {
   try {
     const resposta = await fetch(`${PROFILE_URL}/perfis/${req.usuario.usuario_id}`, {
       method: 'PUT',
@@ -533,8 +558,9 @@ router.put('/perfil', exigirLogin, limitadorEscrita, async (req, res) => {
   }
 })
 
-// upload da foto do PRÓPRIO perfil -- mesma regra, alvo é sempre req.usuario.usuario_id
-router.post('/perfil/foto', exigirLogin, limitadorEscrita, uploadFoto.single('foto'), async (req, res) => {
+// upload da foto -- mesma regra. exigirProprioPerfil vem ANTES do multer, pra não
+// processar o arquivo de quem não tem permissão.
+router.post('/perfil/:usuario_id/foto', exigirLogin, exigirProprioPerfil, limitadorEscrita, uploadFoto.single('foto'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ mensagem: 'Nenhum arquivo enviado. Use o campo "foto".' })
   }
@@ -555,7 +581,7 @@ router.post('/perfil/foto', exigirLogin, limitadorEscrita, uploadFoto.single('fo
   }
 })
 
-// erro do multer (arquivo maior que o permitido)
+// erro do multer (arquivo maior que o permitido) -- precisa vir depois das rotas de upload
 router.use((err, req, res, next) => {
   if (err && err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ mensagem: `Arquivo muito grande. Máximo: ${TAMANHO_MAXIMO_MB}MB.` })
