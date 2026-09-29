@@ -92,7 +92,7 @@ https://github.com/Igor-RR/API-Tom-Hanks/actions/runs/35413640888
 ![alt text](test-pictures/perfil-com-foto.jpeg)
 
 - **Tentativa (recusada) de editar o perfil de outro usuário** — o id forjado no corpo da requisição é ignorado; quem editou foi o próprio dono do token, nunca o usuário alvo:
-![alt text](test-pictures/teste-perfil-edicao-recusada.png)
+![alt text](test-pictures/teste-403-nao-autorizado-perfil.jpeg)
 
 
 ## Arquitetura

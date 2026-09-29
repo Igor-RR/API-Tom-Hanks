@@ -44,6 +44,9 @@ jobs:
       # Este é o teste que efetivamente prova que o código funciona: cadastra
       # um usuário de verdade e faz login de verdade, checando o status HTTP.
       # Se qualquer uma dessas chamadas falhar, o job (e o pipeline) quebra aqui.
+      # OBSERVAÇÃO: profile-service e Garage ainda não fazem parte deste teste de
+      # ponta a ponta -- só sobem e são publicados, upload de foto continua
+      # validado manualmente (ver README, seção do profile-service).
       - name: Testar cadastro e login
         run: |
           EMAIL="ci-teste-$(date +%s)@exemplo.com"
@@ -138,6 +141,19 @@ jobs:
             igorrueda/api-tom-hanks-microserv-log-service:latest
             igorrueda/api-tom-hanks-microserv-log-service:sha-${{ steps.vars.outputs.sha_short }}
 
+      # NOVO -- sem isso, a imagem do profile-service nunca existe no Docker Hub e
+      # o Portainer falha o deploy dessa stack ("pull access denied").
+      # O Garage NÃO entra aqui: é a imagem oficial dxflrs/garage, publicada por
+      # terceiros -- não tem código nosso pra buildar nem publicar.
+      - name: Build & push -- profile-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./upload-profile/profile-service
+          push: true
+          tags: |
+            igorrueda/api-tom-hanks-microserv-profile-service:latest
+            igorrueda/api-tom-hanks-microserv-profile-service:sha-${{ steps.vars.outputs.sha_short }}
+
       # DEPLOY: não automatizado nesta versão. Ver README, seção "Deploy",
       # para o passo manual que fecha o restante do fluxo.
       - name: Lembrete de deploy manual
@@ -146,6 +162,7 @@ jobs:
           echo "  igorrueda/api-tom-hanks-microserv-catalogo:sha-${{ steps.vars.outputs.sha_short }}"
           echo "  igorrueda/api-tom-hanks-microserv-auth-service:sha-${{ steps.vars.outputs.sha_short }}"
           echo "  igorrueda/api-tom-hanks-microserv-log-service:sha-${{ steps.vars.outputs.sha_short }}"
+          echo "  igorrueda/api-tom-hanks-microserv-profile-service:sha-${{ steps.vars.outputs.sha_short }}"
           echo ""
           echo "Deploy automático pendente (ver README) -- atualize a stack"
           echo "manualmente no Portainer: 'Re-pull image and redeploy'."
