@@ -39,8 +39,6 @@ function exigirLogin(req, res, next) {
 function exigirNivel(roleMinimo) {
   return (req, res, next) => {
     if (nivelDe(req.usuario.role) < nivelDe(roleMinimo)) {
-      // LOG: toda tentativa de ação negada por permissão -- ponto único,
-      // cobre qualquer rota que passe por exigirNivel
       registrarEvento({
         usuario_id: req.usuario.usuario_id,
         acao: 'acesso_negado',
@@ -54,8 +52,7 @@ function exigirNivel(roleMinimo) {
 }
 
 // PERFIL: só o dono edita o próprio perfil. Compara o :usuario_id da URL com o
-// usuario_id do JWT (nunca confia no que veio do cliente). Deve vir ANTES do
-// multer nas rotas de upload, pra não processar o arquivo de quem não pode.
+// usuario_id do JWT (nunca confia no que veio do cliente).
 function exigirProprioPerfil(req, res, next) {
   if (String(req.params.usuario_id) !== String(req.usuario.usuario_id)) {
     registrarEvento({
@@ -77,8 +74,6 @@ const limitadorEscrita = rateLimit({
   legacyHeaders: false
 })
 
-// PERFIL: o catalogo só repassa o arquivo pro profile-service, nunca grava em
-// disco nem manda pro MariaDB -- por isso memoryStorage
 const uploadFoto = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: TAMANHO_MAXIMO_MB * 1024 * 1024 }
@@ -93,6 +88,7 @@ router.get('/me', exigirLogin, (req, res) => {
     role: req.usuario.role
   })
 })
+
 // ---------- PROXY PRO AUTH-SERVICE ----------
 
 router.post('/auth/cadastro', async (req, res) => {
@@ -123,12 +119,11 @@ router.post('/auth/login', async (req, res) => {
       return res.status(resposta.status).json(dados)
     }
 
-    // seta o JWT recebido do auth-service como cookie httpOnly
     res.cookie('token', dados.token, {
       httpOnly: true,
-      secure: true,       // exige HTTPS
+      secure: true,
       sameSite: 'strict',
-      maxAge: 1*15*60*1000 //Token expira em 15min
+      maxAge: 1*15*60*1000
     })
 
     res.json({ mensagem: 'Login realizado com sucesso.' })
@@ -140,10 +135,6 @@ router.post('/auth/login', async (req, res) => {
 })
 
 router.post('/auth/logout', (req, res) => {
-  // LOG: rastreabilidade de logout, mesmo sem "sessão" real (JWT stateless).
-  // Usa jwt.decode (NÃO jwt.verify) de propósito: aqui só queremos extrair
-  // o usuario_id pra fins de auditoria, mesmo se o token já tiver expirado.
-  // Esse valor nunca é usado pra autorizar nada -- só entra no log.
   const token = req.cookies.token
   let usuarioId = null
 
@@ -227,7 +218,6 @@ router.get('/filmes', exigirLogin, async (req, res) => {
 
 // ---------- FAVORITOS ----------
 
-// contagem pública -- espectador+
 router.get('/favoritos/contagem', exigirLogin, async (req, res) => {
   try {
     const [linhas] = await db.query(
@@ -266,7 +256,6 @@ router.post('/favoritos', exigirLogin, exigirNivel('fan'), limitadorEscrita, asy
       [req.usuario.usuario_id, tmdb_movie_id, titulo, poster_path]
     )
 
-    // LOG: favoritar com sucesso
     registrarEvento({
       usuario_id: req.usuario.usuario_id,
       acao: 'favoritar',
@@ -298,6 +287,32 @@ router.delete('/favoritos/:tmdb_movie_id', exigirLogin, exigirNivel('fan'), limi
 })
 
 // ---------- COMENTÁRIOS ----------
+
+router.get('/comentarios', exigirLogin, exigirNivel('fan'), async (req, res) => {
+  try {
+    let linhas
+
+    if (nivelDe(req.usuario.role) >= nivelDe('cinefilo')) {
+      [linhas] = await db.query('SELECT * FROM comentarios ORDER BY id')
+    } else {
+      [linhas] = await db.query(
+        'SELECT * FROM comentarios WHERE usuario_id = ? ORDER BY id',
+        [req.usuario.usuario_id]
+      )
+    }
+
+    const porFilme = {}
+    for (const comentario of linhas) {
+      if (!porFilme[comentario.tmdb_movie_id]) porFilme[comentario.tmdb_movie_id] = []
+      porFilme[comentario.tmdb_movie_id].push(comentario)
+    }
+
+    res.json(porFilme)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ mensagem: 'Erro ao buscar comentários.' })
+  }
+})
 
 router.get('/comentarios/:tmdb_movie_id', exigirLogin, exigirNivel('fan'), async (req, res) => {
   try {
@@ -337,7 +352,6 @@ router.post('/comentarios', exigirLogin, exigirNivel('fan'), limitadorEscrita, a
       [req.usuario.usuario_id, tmdb_movie_id, texto]
     )
 
-    // LOG: comentário criado com sucesso
     registrarEvento({
       usuario_id: req.usuario.usuario_id,
       acao: 'comentar',
@@ -368,13 +382,10 @@ router.delete('/comentarios/proprio/:id', exigirLogin, exigirNivel('fan'), limit
   }
 })
 
-// rota de MODERAÇÃO -- exclusiva de stalker (o papel-teto assume o lugar de "admin")
 router.delete('/comentarios/:id', exigirLogin, exigirNivel('stalker'), limitadorEscrita, async (req, res) => {
   try {
     await db.query('DELETE FROM comentarios WHERE id = ?', [req.params.id])
 
-    // LOG: apagar comentário via moderação (diferente do auto-delete acima,
-    // que não é logado por não ser um evento de moderação)
     registrarEvento({
       usuario_id: req.usuario.usuario_id,
       acao: 'comentario_deletado_moderacao',
@@ -391,7 +402,6 @@ router.delete('/comentarios/:id', exigirLogin, exigirNivel('stalker'), limitador
 
 // ---------- TIER LIST ----------
 
-// lista todos os stalkers que já têm uma tier list, com contagem de filmes classificados
 router.get('/tier-lists', exigirLogin, async (req, res) => {
   try {
     const [linhas] = await db.query(
@@ -407,7 +417,6 @@ router.get('/tier-lists', exigirLogin, async (req, res) => {
   }
 })
 
-// tier list completa de um stalker específico
 router.get('/tier-list/:usuario_id', exigirLogin, async (req, res) => {
   try {
     const [linhas] = await db.query(
@@ -421,7 +430,6 @@ router.get('/tier-list/:usuario_id', exigirLogin, async (req, res) => {
   }
 })
 
-// stalker classifica/reclassifica um filme na própria lista
 router.put('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), limitadorEscrita, async (req, res) => {
   const { titulo, poster_path, tier } = req.body
   if (!titulo || !tier) {
@@ -442,7 +450,6 @@ router.put('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), lim
   }
 })
 
-// stalker remove um filme da própria lista (volta pro "não classificado")
 router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), limitadorEscrita, async (req, res) => {
   try {
     await db.query(
@@ -458,8 +465,6 @@ router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), 
 
 // ---------- LOGS (só admin) ----------
 
-// Apenas 'admin' pode acessar ios Logs de auditoria. Essa rota foi pensada devido a questões
-// de segurança/compliance.
 router.get('/logs', exigirLogin, exigirNivel('admin'), async (req, res) => {
   try {
     const limite = req.query.limit || 50
@@ -483,8 +488,6 @@ async function buscarFavoritosDoUsuario(usuarioId) {
 }
 
 // fire-and-forget, mesmo princípio do registrarEvento: nunca trava a resposta principal.
-// O nome vem do JWT de quem está logado e é copiado pra tabela perfis (denormalizado),
-// já que o catalogo nunca acessa a tabela usuarios.
 function sincronizarNome(usuarioId, nome) {
   fetch(`${PROFILE_URL}/perfis/${usuarioId}/nome`, {
     method: 'PATCH',
@@ -503,13 +506,11 @@ router.get('/perfil/me', exigirLogin, async (req, res) => {
       buscarFavoritosDoUsuario(req.usuario.usuario_id)
     ])
 
-    const fotoUrlProxy = respostaPerfil.fotoUrl ? `/api/perfil/foto-proxy/${req.usuario.usuario_id}` : null
-
     res.json({
       usuario_id: req.usuario.usuario_id,
       nome: req.usuario.nome,
       bio: respostaPerfil.bio,
-      foto_url: fotoUrlProxy,
+      foto_url: respostaPerfil.fotoUrl, // URL pré-assinada do Garage -- o navegador abre direto
       favoritos,
       eh_proprio_perfil: true
     })
@@ -529,13 +530,11 @@ router.get('/perfil/:usuario_id', exigirLogin, async (req, res) => {
       buscarFavoritosDoUsuario(usuarioId)
     ])
 
-    const fotoUrlProxy = respostaPerfil.fotoUrl ? `/api/perfil/foto-proxy/${usuarioId}` : null
-
     res.json({
       usuario_id: Number(usuarioId),
       nome: respostaPerfil.nome,
       bio: respostaPerfil.bio,
-      foto_url: fotoUrlProxy,
+      foto_url: respostaPerfil.fotoUrl, // URL pré-assinada do Garage -- o navegador abre direto
       favoritos,
       eh_proprio_perfil: Number(usuarioId) === req.usuario.usuario_id
     })
@@ -545,49 +544,7 @@ router.get('/perfil/:usuario_id', exigirLogin, async (req, res) => {
   }
 })
 
-// ---------- PROXY DE IMAGEM DO GARAGE (Versão Robusta) ----------
-router.get('/perfil/foto-proxy/:usuario_id', exigirLogin, async (req, res) => {
-  try {
-    const usuarioId = req.params.usuario_id;
-    
-    // Pega os dados diretamente do profile-service
-    const respostaPerfil = await fetch(`${PROFILE_URL}/perfis/${usuarioId}`);
-    const dadosPerfil = await respostaPerfil.json();
-
-    if (!dadosPerfil || !dadosPerfil.fotoUrl) {
-      return res.status(404).json({ mensagem: 'Foto não encontrada.' });
-    }
-
-    // Tenta buscar a foto. Se falhar com a url pública, tenta ajustar para o container interno do garage se necessário
-    let urlParaBuscar = dadosPerfil.fotoUrl;
-    
-    // Fallback inteligente caso a URL pública aponte para localhost ou porta externa inacessível internamente
-    if (urlParaBuscar.includes('localhost') || urlParaBuscar.includes('127.0.0.1')) {
-      urlParaBuscar = urlParaBuscar.replace(/localhost|127\.0\.0\.1/, 'garage');
-    }
-
-    const respostaGarage = await fetch(urlParaBuscar);
-    
-    if (!respostaGarage.ok) {
-      return res.status(404).json({ mensagem: 'Erro ao carregar arquivo do storage.' });
-    }
-
-    const contentType = respostaGarage.headers.get('content-type') || 'image/jpeg';
-    const bufferArray = await respostaGarage.arrayBuffer();
-    const buffer = Buffer.from(bufferArray);
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.send(buffer);
-
-  } catch (err) {
-    console.error('Erro no proxy de imagem:', err);
-    res.status(500).json({ mensagem: 'Erro ao exibir imagem de perfil.' });
-  }
-});
-
 // edita a bio -- 403 se o :usuario_id não for o de quem está logado.
-// A chamada ao profile-service usa o id do JWT, nunca o da URL (segunda camada).
 router.put('/perfil/:usuario_id', exigirLogin, exigirProprioPerfil, limitadorEscrita, async (req, res) => {
   try {
     const resposta = await fetch(`${PROFILE_URL}/perfis/${req.usuario.usuario_id}`, {
@@ -603,29 +560,28 @@ router.put('/perfil/:usuario_id', exigirLogin, exigirProprioPerfil, limitadorEsc
   }
 })
 
-// upload da foto -- CORRIGIDO PARA EVITAR O TRAVAMENTO EM PENDING
+// upload da foto -- SEMPRE multipart/form-data de verdade pro profile-service, nunca
+// buffer cru: o profile-service usa multer do lado dele pra extrair req.file.
 router.post('/perfil/:usuario_id/foto', exigirLogin, exigirProprioPerfil, limitadorEscrita, uploadFoto.single('foto'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ mensagem: 'Nenhum arquivo enviado. Use o campo "foto".' })
   }
 
   try {
+    const formData = new FormData()
+    formData.append('foto', new Blob([req.file.buffer]), req.file.originalname)
+
     const resposta = await fetch(`${PROFILE_URL}/perfis/${req.usuario.usuario_id}/foto`, {
       method: 'POST',
-      headers: {
-        'Content-Type': req.file.mimetype,
-        'X-Original-Filename': encodeURIComponent(req.file.originalname)
-      },
-      body: req.file.buffer
+      body: formData
     })
     const dados = await resposta.json()
-    
-    if (dados.ok) {
-      dados.foto_url = `/api/perfil/foto-proxy/${req.usuario.usuario_id}`
-      dados.fotoUrl = dados.foto_url
+
+    if (!resposta.ok) {
+      return res.status(resposta.status).json(dados)
     }
 
-    res.status(resposta.status).json(dados)
+    res.json({ ok: true, foto_url: dados.fotoUrl }) // URL pré-assinada do Garage
   } catch (err) {
     console.error(err)
     res.status(502).json({ mensagem: 'Serviço de perfil indisponível.' })

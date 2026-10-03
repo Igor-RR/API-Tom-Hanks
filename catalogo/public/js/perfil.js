@@ -83,15 +83,16 @@ function iniciaisDoNome(nome) {
 }
 
 function renderizarAvatar(fotoUrl, nome) {
-  // Se a URL for um blob temporário ou uma string válida do proxy
+  // IMPORTANTE: nunca acrescentar query string numa URL pré-assinada (tipo "?t=...").
+  // A assinatura (X-Amz-Signature) cobre exatamente os parâmetros que estavam presentes
+  // na hora de gerar a URL -- adicionar qualquer parâmetro novo invalida a assinatura e
+  // o Garage recusa a requisição (é esse bug que fazia a imagem "sumir" depois de
+  // aparecer: o preview local funcionava, mas a troca pra URL real falhava).
+  // Cache também não é um problema aqui: a cada carregamento do perfil o backend gera
+  // uma URL NOVA (assinatura e expiração novas), então o navegador nunca fica preso
+  // numa versão antiga em cache.
   if (fotoUrl && fotoUrl.trim() !== '') {
-    // Se for blob local, não adiciona cache buster
-    if (fotoUrl.startsWith('blob:')) {
-      avatarFoto.src = fotoUrl
-    } else {
-      const separador = fotoUrl.includes('?') ? '&' : '?'
-      avatarFoto.src = `${fotoUrl}${separador}t=${Date.now()}`
-    }
+    avatarFoto.src = fotoUrl
     avatarFoto.hidden = false
     avatarIniciais.hidden = true
   } else {
