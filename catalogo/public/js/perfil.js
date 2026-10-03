@@ -104,6 +104,7 @@ function renderizarPerfil(perfil) {
   const fotoUrl = perfil.foto_url ?? perfil.fotoUrl
   const ehProprioPerfil = perfil.eh_proprio_perfil ?? perfil.ehProprioPerfil
 
+  // Adiciona timestamp opcional se necessário para quebrar cache na carga inicial
   renderizarAvatar(fotoUrl, perfil.nome)
   nomeUsuario.textContent = perfil.nome || 'Usuário'
 
@@ -217,7 +218,10 @@ inputFoto.addEventListener('change', async () => {
       return
     }
 
-    renderizarAvatar(dados.foto_url ?? dados.fotoUrl, nomeUsuario.textContent)
+    const novaUrl = dados.foto_url ?? dados.fotoUrl
+    // Adiciona timestamp para forçar o navegador a ignorar o cache da imagem antiga
+    const urlComCacheBuster = novaUrl ? `${novaUrl}&t=${Date.now()}` : null
+    renderizarAvatar(urlComCacheBuster, nomeUsuario.textContent)
   } catch (err) {
     renderizarAvatar(fotoAnterior, nomeUsuario.textContent)
     mostrarErroFoto('Erro ao enviar a foto. Tente novamente.')
