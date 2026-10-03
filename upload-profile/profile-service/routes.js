@@ -67,28 +67,58 @@ router.put('/:usuarioId', async (req, res) => {
   res.json({ ok: true, bio });
 });
 
-// POST /perfis/:usuarioId/foto — recebe o arquivo (campo "foto"), valida e sobe pro Garage
-router.post('/:usuarioId/foto', upload.single('foto'), validarImagemPerfil, async (req, res) => {
+// POST /perfis/:usuarioId/foto — flexível: aceita tanto o multer multipart quanto o buffer cru enviado pelo Catálogo
+router.post('/:usuarioId/foto', async (req, res) => {
   try {
     const { usuarioId } = req.params;
-    const { extensao, mimeType } = req.imagemValidada;
+    
+    let buffer;
+    let mimeType;
+    let nomeOriginal;
+
+    // Se passou pelo multer (multipart/form-data)
+    if (req.file) {
+      buffer = req.file.buffer;
+      mimeType = req.file.mimetype;
+      nomeOriginal = req.file.originalname;
+    } 
+    // Se veio como buffer cru no body (enviado pelo Catálogo atualizado)
+    else if (req.body && Buffer.isBuffer(req.body) && req.body.length > 0) {
+      buffer = req.body;
+      mimeType = req.headers['content-type'] || 'image/jpeg';
+      nomeOriginal = decodeURIComponent(req.headers['x-original-filename'] || 'foto.jpg');
+    } 
+    // Fallback: lê o stream diretamente da requisição
+    else {
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      buffer = Buffer.concat(chunks);
+      mimeType = req.headers['content-type'] || 'image/jpeg';
+      nomeOriginal = decodeURIComponent(req.headers['x-original-filename'] || 'foto.jpg');
+    }
+
+    if (!buffer || buffer.length === 0) {
+      return res.status(400).json({ mensagem: 'Nenhum arquivo enviado. Use o campo "foto".' });
+    }
+
+    const extensao = (nomeOriginal.split('.').pop() || 'jpg').toLowerCase();
+    const mimeValido = ['image/jpeg', 'image/png', 'image/webp'].includes(mimeType) ? mimeType : 'image/jpeg';
 
     const [linhas] = await db.query('SELECT foto_key FROM perfis WHERE usuario_id = ?', [usuarioId]);
     const fotoAntiga = linhas[0]?.foto_key;
 
-    // 1ª gravação: o arquivo em si vai pro Garage
-    const novaKey = await uploadFotoPerfil(usuarioId, req.file.buffer, extensao, mimeType);
+    // 1ª gravação: o arquivo vai pro Garage
+    const novaKey = await uploadFotoPerfil(usuarioId, buffer, extensao, mimeValido);
 
-    // 2ª gravação: só a referência (chave do objeto) vai pro MariaDB
+    // 2ª gravação: só a referência (chave) vai pro MariaDB
     await db.query(
       `INSERT INTO perfis (usuario_id, foto_key) VALUES (?, ?)
        ON DUPLICATE KEY UPDATE foto_key = VALUES(foto_key)`,
       [usuarioId, novaKey]
     );
 
-    // Só apaga o objeto antigo depois que o novo já está salvo e referenciado — se a
-    // exclusão falhar, o perfil continua consistente (a referência aponta pro objeto novo,
-    // que já existe); só sobra um arquivo órfão no bucket, não um perfil quebrado.
     if (fotoAntiga && fotoAntiga !== novaKey) {
       await apagarFotoPerfil(fotoAntiga);
     }
