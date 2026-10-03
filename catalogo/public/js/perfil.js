@@ -85,7 +85,9 @@ function iniciaisDoNome(nome) {
 
 function renderizarAvatar(fotoUrl, nome) {
   if (fotoUrl) {
-    avatarFoto.src = fotoUrl
+    // Garante que se a URL já tiver parâmetros, usa '&t=', senão '?t='
+    const separador = fotoUrl.includes('?') ? '&' : '?'
+    avatarFoto.src = `${fotoUrl}${separador}t=${Date.now()}`
     avatarFoto.hidden = false
     avatarIniciais.hidden = true
   } else {
@@ -98,21 +100,15 @@ function renderizarAvatar(fotoUrl, nome) {
 function renderizarPerfil(perfil) {
   cartaoPerfil.hidden = false
 
-  // O backend real do catalogo usa snake_case (mesma convenção de usuario_id,
-  // tmdb_movie_id etc.), mas o profile-service devolve camelCase em alguns pontos --
-  // aceitamos os dois nomes aqui pra não depender de qual dos dois lados foi ajustado.
   const fotoUrl = perfil.foto_url ?? perfil.fotoUrl
   const ehProprioPerfil = perfil.eh_proprio_perfil ?? perfil.ehProprioPerfil
 
-  // Adiciona timestamp opcional se necessário para quebrar cache na carga inicial
   renderizarAvatar(fotoUrl, perfil.nome)
   nomeUsuario.textContent = perfil.nome || 'Usuário'
 
   bioAtual = perfil.bio || ''
   bioTexto.textContent = bioAtual || (ehProprioPerfil ? 'Você ainda não escreveu uma bio.' : 'Sem bio.')
 
-  // controles de edição só aparecem no PRÓPRIO perfil -- isso é só interface; a garantia
-  // real está no backend (PUT/POST usam sempre o id do JWT, nunca o :id da URL)
   if (ehProprioPerfil) {
     meuUsuarioId = perfil.usuario_id ?? perfil.usuarioId
     labelTrocarFoto.hidden = false
@@ -198,9 +194,6 @@ inputFoto.addEventListener('change', async () => {
 
   esconderErroFoto()
 
-  // pré-visualização otimista: mostra a foto local na hora, antes mesmo da resposta do
-  // servidor -- se der erro (tipo/tamanho inválido), a linha de baixo desfaz e volta
-  // pro estado anterior (foto antiga ou iniciais)
   const fotoAnterior = avatarFoto.hidden ? null : avatarFoto.src
   const preview = URL.createObjectURL(arquivo)
   renderizarAvatar(preview, nomeUsuario.textContent)
@@ -219,9 +212,7 @@ inputFoto.addEventListener('change', async () => {
     }
 
     const novaUrl = dados.foto_url ?? dados.fotoUrl
-    // Adiciona timestamp para forçar o navegador a ignorar o cache da imagem antiga
-    const urlComCacheBuster = novaUrl ? `${novaUrl}&t=${Date.now()}` : null
-    renderizarAvatar(urlComCacheBuster, nomeUsuario.textContent)
+    renderizarAvatar(novaUrl, nomeUsuario.textContent)
   } catch (err) {
     renderizarAvatar(fotoAnterior, nomeUsuario.textContent)
     mostrarErroFoto('Erro ao enviar a foto. Tente novamente.')

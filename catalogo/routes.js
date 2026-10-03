@@ -503,11 +503,13 @@ router.get('/perfil/me', exigirLogin, async (req, res) => {
       buscarFavoritosDoUsuario(req.usuario.usuario_id)
     ])
 
+    const fotoUrlProxy = respostaPerfil.fotoUrl ? `/api/perfil/foto-proxy/${req.usuario.usuario_id}` : null
+
     res.json({
       usuario_id: req.usuario.usuario_id,
       nome: req.usuario.nome,
       bio: respostaPerfil.bio,
-      foto_url: respostaPerfil.fotoUrl,
+      foto_url: fotoUrlProxy,
       favoritos,
       eh_proprio_perfil: true
     })
@@ -527,11 +529,13 @@ router.get('/perfil/:usuario_id', exigirLogin, async (req, res) => {
       buscarFavoritosDoUsuario(usuarioId)
     ])
 
+    const fotoUrlProxy = respostaPerfil.fotoUrl ? `/api/perfil/foto-proxy/${usuarioId}` : null
+
     res.json({
       usuario_id: Number(usuarioId),
       nome: respostaPerfil.nome,
       bio: respostaPerfil.bio,
-      foto_url: respostaPerfil.fotoUrl,
+      foto_url: fotoUrlProxy,
       favoritos,
       eh_proprio_perfil: Number(usuarioId) === req.usuario.usuario_id
     })
@@ -540,6 +544,38 @@ router.get('/perfil/:usuario_id', exigirLogin, async (req, res) => {
     res.status(502).json({ mensagem: 'Serviço de perfil indisponível.' })
   }
 })
+
+// ---------- PROXY DE IMAGEM DO GARAGE (Evita Mixed Content e erro de porta 3900) ----------
+router.get('/perfil/foto-proxy/:usuario_id', exigirLogin, async (req, res) => {
+  try {
+    const usuarioId = req.params.usuario_id;
+    
+    const respostaPerfil = await fetch(`${PROFILE_URL}/perfis/${usuarioId}`);
+    const dadosPerfil = await respostaPerfil.json();
+
+    if (!dadosPerfil || !dadosPerfil.fotoUrl) {
+      return res.status(404).json({ mensagem: 'Foto não encontrada.' });
+    }
+
+    const respostaGarage = await fetch(dadosPerfil.fotoUrl);
+    
+    if (!respostaGarage.ok) {
+      return res.status(404).json({ mensagem: 'Erro ao carregar arquivo do storage.' });
+    }
+
+    const contentType = respostaGarage.headers.get('content-type') || 'image/jpeg';
+    const bufferArray = await respostaGarage.arrayBuffer();
+    const buffer = Buffer.from(bufferArray);
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(buffer);
+
+  } catch (err) {
+    console.error('Erro no proxy de imagem:', err);
+    res.status(500).json({ mensagem: 'Erro ao exibir imagem de perfil.' });
+  }
+});
 
 // edita a bio -- 403 se o :usuario_id não for o de quem está logado.
 // A chamada ao profile-service usa o id do JWT, nunca o da URL (segunda camada).
@@ -565,8 +601,6 @@ router.post('/perfil/:usuario_id/foto', exigirLogin, exigirProprioPerfil, limita
   }
 
   try {
-    // Em vez de usar Blob/FormData do Node que trava o stream entre containers,
-    // usamos uma requisição com o buffer cru e passamos o nome original nos headers.
     const resposta = await fetch(`${PROFILE_URL}/perfis/${req.usuario.usuario_id}/foto`, {
       method: 'POST',
       headers: {
@@ -576,6 +610,12 @@ router.post('/perfil/:usuario_id/foto', exigirLogin, exigirProprioPerfil, limita
       body: req.file.buffer
     })
     const dados = await resposta.json()
+    
+    if (dados.ok) {
+      dados.foto_url = `/api/perfil/foto-proxy/${req.usuario.usuario_id}`
+      dados.fotoUrl = dados.foto_url
+    }
+
     res.status(resposta.status).json(dados)
   } catch (err) {
     console.error(err)
