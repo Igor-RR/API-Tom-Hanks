@@ -545,11 +545,12 @@ router.get('/perfil/:usuario_id', exigirLogin, async (req, res) => {
   }
 })
 
-// ---------- PROXY DE IMAGEM DO GARAGE (Evita Mixed Content e erro de porta 3900) ----------
+// ---------- PROXY DE IMAGEM DO GARAGE (Versão Robusta) ----------
 router.get('/perfil/foto-proxy/:usuario_id', exigirLogin, async (req, res) => {
   try {
     const usuarioId = req.params.usuario_id;
     
+    // Pega os dados diretamente do profile-service
     const respostaPerfil = await fetch(`${PROFILE_URL}/perfis/${usuarioId}`);
     const dadosPerfil = await respostaPerfil.json();
 
@@ -557,7 +558,15 @@ router.get('/perfil/foto-proxy/:usuario_id', exigirLogin, async (req, res) => {
       return res.status(404).json({ mensagem: 'Foto não encontrada.' });
     }
 
-    const respostaGarage = await fetch(dadosPerfil.fotoUrl);
+    // Tenta buscar a foto. Se falhar com a url pública, tenta ajustar para o container interno do garage se necessário
+    let urlParaBuscar = dadosPerfil.fotoUrl;
+    
+    // Fallback inteligente caso a URL pública aponte para localhost ou porta externa inacessível internamente
+    if (urlParaBuscar.includes('localhost') || urlParaBuscar.includes('127.0.0.1')) {
+      urlParaBuscar = urlParaBuscar.replace(/localhost|127\.0\.0\.1/, 'garage');
+    }
+
+    const respostaGarage = await fetch(urlParaBuscar);
     
     if (!respostaGarage.ok) {
       return res.status(404).json({ mensagem: 'Erro ao carregar arquivo do storage.' });
