@@ -558,20 +558,22 @@ router.put('/perfil/:usuario_id', exigirLogin, exigirProprioPerfil, limitadorEsc
   }
 })
 
-// upload da foto -- mesma regra. exigirProprioPerfil vem ANTES do multer, pra não
-// processar o arquivo de quem não tem permissão.
+// upload da foto -- CORRIGIDO PARA EVITAR O TRAVAMENTO EM PENDING
 router.post('/perfil/:usuario_id/foto', exigirLogin, exigirProprioPerfil, limitadorEscrita, uploadFoto.single('foto'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ mensagem: 'Nenhum arquivo enviado. Use o campo "foto".' })
   }
 
   try {
-    const formData = new FormData()
-    formData.append('foto', new Blob([req.file.buffer]), req.file.originalname)
-
+    // Em vez de usar Blob/FormData do Node que trava o stream entre containers,
+    // usamos uma requisição com o buffer cru e passamos o nome original nos headers.
     const resposta = await fetch(`${PROFILE_URL}/perfis/${req.usuario.usuario_id}/foto`, {
       method: 'POST',
-      body: formData
+      headers: {
+        'Content-Type': req.file.mimetype,
+        'X-Original-Filename': encodeURIComponent(req.file.originalname)
+      },
+      body: req.file.buffer
     })
     const dados = await resposta.json()
     res.status(resposta.status).json(dados)
