@@ -29,7 +29,7 @@ const params = new URLSearchParams(window.location.search)
 const idPerfilVisitado = params.get('id') // ausente = próprio perfil
 
 let bioAtual = ''
-let meuUsuarioId = null // preenchido quando é o próprio perfil; usado nas URLs de edição
+let meuUsuarioId = null
 
 function mostrarStatus(texto) {
   mensagemStatus.textContent = texto
@@ -49,7 +49,6 @@ function esconderErroFoto() {
   erroFoto.hidden = true
 }
 
-// ---------- carregar o perfil ao abrir a página ----------
 async function iniciar() {
   mostrarStatus('Carregando perfil...')
 
@@ -84,13 +83,19 @@ function iniciaisDoNome(nome) {
 }
 
 function renderizarAvatar(fotoUrl, nome) {
-  if (fotoUrl) {
-    // Garante que se a URL já tiver parâmetros, usa '&t=', senão '?t='
-    const separador = fotoUrl.includes('?') ? '&' : '?'
-    avatarFoto.src = `${fotoUrl}${separador}t=${Date.now()}`
+  // Se a URL for um blob temporário ou uma string válida do proxy
+  if (fotoUrl && fotoUrl.trim() !== '') {
+    // Se for blob local, não adiciona cache buster
+    if (fotoUrl.startsWith('blob:')) {
+      avatarFoto.src = fotoUrl
+    } else {
+      const separador = fotoUrl.includes('?') ? '&' : '?'
+      avatarFoto.src = `${fotoUrl}${separador}t=${Date.now()}`
+    }
     avatarFoto.hidden = false
     avatarIniciais.hidden = true
   } else {
+    avatarFoto.removeAttribute('src')
     avatarIniciais.textContent = iniciaisDoNome(nome)
     avatarIniciais.hidden = false
     avatarFoto.hidden = true
@@ -205,6 +210,9 @@ inputFoto.addEventListener('change', async () => {
     const resposta = await fetch(`/api/perfil/${meuUsuarioId}/foto`, { method: 'POST', body: formData })
     const dados = await resposta.json()
 
+    // Revoga o preview local para liberar memória
+    URL.revokeObjectURL(preview)
+
     if (!resposta.ok) {
       renderizarAvatar(fotoAnterior, nomeUsuario.textContent)
       mostrarErroFoto(dados.erro || dados.mensagem || 'Não foi possível enviar a foto.')
@@ -214,15 +222,14 @@ inputFoto.addEventListener('change', async () => {
     const novaUrl = dados.foto_url ?? dados.fotoUrl
     renderizarAvatar(novaUrl, nomeUsuario.textContent)
   } catch (err) {
+    URL.revokeObjectURL(preview)
     renderizarAvatar(fotoAnterior, nomeUsuario.textContent)
     mostrarErroFoto('Erro ao enviar a foto. Tente novamente.')
   } finally {
-    URL.revokeObjectURL(preview)
     inputFoto.value = ''
   }
 })
 
-// ---------- logout ----------
 btnLogout.addEventListener('click', async () => {
   await fetch('/api/auth/logout', { method: 'POST' })
   window.location.href = '/login.html'
