@@ -37,16 +37,19 @@ services:
 
   garage:
     image: dxflrs/garage:v2.0.0
+    # SEM "ports:" -- o navegador nunca fala com o Garage direto. Essa hospedagem só
+    # roteia de forma confiável a porta principal do projeto (a do catalogo); uma porta
+    # extra publicada aqui não é estável (testado e confirmado). Quem fala com o Garage
+    # é só o profile-service, pela rede interna do Docker.
     volumes:
-      - ./upload-profile/garage/garage.toml:/etc/garage.toml:ro
+      - /opt/garage/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
     restart: unless-stopped
-    ports:
-      - "3900:3900"
 
   profile-service:
     build: ./upload-profile/profile-service
+    image: igorrueda/api-tom-hanks-microserv-profile-service:latest
     container_name: profile-service
     env_file: .env
     depends_on:
