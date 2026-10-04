@@ -2,6 +2,7 @@ const express = require('express')
 const jwt = require('jsonwebtoken')
 const rateLimit = require('express-rate-limit')
 const multer = require('multer')
+const { Readable } = require('stream')
 const db = require('./db')
 const { registrarEvento } = require('./logClient') // LOG: helper de auditoria
 
@@ -510,7 +511,10 @@ router.get('/perfil/me', exigirLogin, async (req, res) => {
       usuario_id: req.usuario.usuario_id,
       nome: req.usuario.nome,
       bio: respostaPerfil.bio,
-      foto_url: respostaPerfil.fotoUrl, // URL pré-assinada do Garage -- o navegador abre direto
+      // caminho de proxy -- o navegador nunca fala com o Garage direto (porta extra não é
+      // roteada de forma confiável pela hospedagem). Quem busca o arquivo é o
+      // profile-service, pela rede interna; o catalogo repassa os bytes (ver rota abaixo).
+      foto_url: respostaPerfil.temFoto ? `/api/perfil/${req.usuario.usuario_id}/foto` : null,
       favoritos,
       eh_proprio_perfil: true
     })
@@ -534,7 +538,7 @@ router.get('/perfil/:usuario_id', exigirLogin, async (req, res) => {
       usuario_id: Number(usuarioId),
       nome: respostaPerfil.nome,
       bio: respostaPerfil.bio,
-      foto_url: respostaPerfil.fotoUrl, // URL pré-assinada do Garage -- o navegador abre direto
+      foto_url: respostaPerfil.temFoto ? `/api/perfil/${usuarioId}/foto` : null,
       favoritos,
       eh_proprio_perfil: Number(usuarioId) === req.usuario.usuario_id
     })
@@ -581,10 +585,31 @@ router.post('/perfil/:usuario_id/foto', exigirLogin, exigirProprioPerfil, limita
       return res.status(resposta.status).json(dados)
     }
 
-    res.json({ ok: true, foto_url: dados.fotoUrl }) // URL pré-assinada do Garage
+    res.json({ ok: true, foto_url: `/api/perfil/${req.usuario.usuario_id}/foto` })
   } catch (err) {
     console.error(err)
     res.status(502).json({ mensagem: 'Serviço de perfil indisponível.' })
+  }
+})
+
+// GET /perfil/:usuario_id/foto -- PROXY: busca os bytes da imagem no profile-service (que
+// busca no Garage pela rede interna) e repassa pro navegador, pela MESMA porta que o resto
+// do site já usa (a única roteada de forma confiável por esta hospedagem). Só leitura, sem
+// exigirProprioPerfil -- ver qualquer perfil é permitido, só editar que não.
+router.get('/perfil/:usuario_id/foto', exigirLogin, async (req, res) => {
+  try {
+    const resposta = await fetch(`${PROFILE_URL}/perfis/${req.params.usuario_id}/foto-arquivo`)
+
+    if (!resposta.ok) {
+      return res.status(resposta.status).end()
+    }
+
+    res.set('Content-Type', resposta.headers.get('content-type') || 'image/jpeg')
+    res.set('Cache-Control', 'private, max-age=60') // cache curto -- a foto pode trocar
+    Readable.fromWeb(resposta.body).pipe(res)
+  } catch (err) {
+    console.error(err)
+    res.status(502).end()
   }
 })
 

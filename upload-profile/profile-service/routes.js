@@ -3,7 +3,7 @@ const router = express.Router();
 
 const db = require('./db');
 const { upload, validarImagemPerfil, tratarErroUpload } = require('./middleware/upload');
-const { uploadFotoPerfil, apagarFotoPerfil, gerarUrlFotoPerfil } = require('./garageClient');
+const { uploadFotoPerfil, apagarFotoPerfil, baixarFotoPerfil } = require('./garageClient');
 const logClient = require('./logClient');
 
 // ------------------------------------------------------------------------------------------
@@ -14,12 +14,10 @@ const logClient = require('./logClient');
 //
 // Quem garante isso é o catálogo: o catálogo decodifica o JWT do cookie httpOnly com seu
 // middleware `exigirLogin`, pega o id de dentro do token (nunca do corpo da requisição do
-// navegador) e só então chama `PUT /perfis/:usuarioId` ou `POST /perfis/:usuarioId/foto`
-// aqui, usando esse id já validado. Nunca exponha este serviço direto pra internet — se ele
-// ficasse público, qualquer um poderia editar o perfil de qualquer usuarioId.
+// navegador) e só então chama as rotas abaixo, usando esse id já validado.
 // ------------------------------------------------------------------------------------------
 
-// GET /perfis/:usuarioId — dados do perfil (nome + bio + URL assinada da foto, se houver)
+// GET /perfis/:usuarioId — dados do perfil (nome, bio, e SE existe foto, não a URL dela)
 router.get('/:usuarioId', async (req, res) => {
   try {
     const { usuarioId } = req.params;
@@ -34,7 +32,7 @@ router.get('/:usuarioId', async (req, res) => {
       usuarioId: perfil.usuario_id,
       nome: perfil.nome,
       bio: perfil.bio,
-      fotoUrl: await gerarUrlFotoPerfil(perfil.foto_key),
+      temFoto: Boolean(perfil.foto_key),
     });
   } catch (erro) {
     console.error('[perfil-service] Erro ao buscar perfil:', erro);
@@ -42,8 +40,30 @@ router.get('/:usuarioId', async (req, res) => {
   }
 });
 
-// PATCH /perfis/:usuarioId/nome — sincroniza só o nome (denormalizado a partir do JWT que o
-// catalogo decodifica). Nunca mexe em bio/foto_key.
+// GET /perfis/:usuarioId/foto-arquivo — serve os BYTES da foto, buscando no Garage pela
+// rede interna. Não é pra o navegador chamar direto: o catalogo é quem repassa essa
+// resposta pro navegador (ver GET /api/perfil/:usuario_id/foto no catalogo).
+router.get('/:usuarioId/foto-arquivo', async (req, res) => {
+  try {
+    const { usuarioId } = req.params;
+    const [linhas] = await db.query('SELECT foto_key FROM perfis WHERE usuario_id = ?', [usuarioId]);
+    const fotoKey = linhas[0]?.foto_key;
+
+    if (!fotoKey) {
+      return res.status(404).json({ erro: 'Usuário sem foto de perfil.' });
+    }
+
+    const objeto = await baixarFotoPerfil(fotoKey);
+    res.set('Content-Type', objeto.ContentType || 'image/jpeg');
+    objeto.Body.pipe(res);
+  } catch (erro) {
+    console.error('[perfil-service] Erro ao servir arquivo da foto:', erro);
+    res.status(500).json({ erro: 'Erro ao buscar a foto.' });
+  }
+});
+
+// PATCH /perfis/:usuarioId/nome — sincroniza só o nome (denormalizado a partir do JWT que
+// o catalogo decodifica). Nunca mexe em bio/foto_key.
 router.patch('/:usuarioId/nome', async (req, res) => {
   try {
     const { usuarioId } = req.params;
@@ -83,8 +103,7 @@ router.put('/:usuarioId', async (req, res) => {
 
 // POST /perfis/:usuarioId/foto — SEMPRE multipart/form-data, campo "foto". upload.single()
 // extrai o arquivo; validarImagemPerfil confere os bytes reais (magic numbers) e o tamanho
-// (multer.limits.fileSize) ANTES de qualquer upload pro Garage -- nunca confia no
-// Content-Type nem na extensão que o cliente declarou.
+// (multer.limits.fileSize) ANTES de qualquer upload pro Garage.
 router.post('/:usuarioId/foto', upload.single('foto'), validarImagemPerfil, async (req, res) => {
   try {
     const { usuarioId } = req.params;
@@ -103,14 +122,13 @@ router.post('/:usuarioId/foto', upload.single('foto'), validarImagemPerfil, asyn
       [usuarioId, novaKey]
     );
 
-    // Só apaga o objeto antigo depois que o novo já está salvo e referenciado.
     if (fotoAntiga && fotoAntiga !== novaKey) {
       await apagarFotoPerfil(fotoAntiga);
     }
 
     logClient.registrar({ usuario_id: Number(usuarioId), acao: 'foto_perfil_atualizada' });
 
-    res.json({ ok: true, fotoUrl: await gerarUrlFotoPerfil(novaKey) });
+    res.json({ ok: true, temFoto: true });
   } catch (erro) {
     console.error('[perfil-service] Erro ao processar upload de foto:', erro);
     res.status(500).json({ erro: 'Falha ao salvar a imagem. Tente novamente.' });
