@@ -10,7 +10,7 @@ Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 
 - Cadastro e login próprios da aplicação, com sessão via **JWT em cookie httpOnly**
 - 5 papéis de usuário hierárquicos (`espectador` < `fan` < `cinefilo` < `stalker` < `admin`), cada um herdando as permissões do anterior
-- Recuperação de senha por e-mail, com token de expiração de 30 minutos e uso único
+- Recuperação de senha por e-mail, com token de expiração de 15 minutos e uso único
 - Listagem de filmes com Tom Hanks, buscados ao vivo na API do TMDB (pôster, título e sinopse nunca são salvos localmente)
 - Contagem pública de favoritos por filme, visível a qualquer usuário logado
 - Favoritar / desfavoritar filmes e comentar (a partir do papel `fan`)
@@ -503,7 +503,7 @@ Localmente, os serviços leem o mesmo arquivo `.env` na raiz (o Docker Compose r
 - O papel (`role`) do usuário vem embutido no JWT assinado pelo `auth-service`; o middleware `exigirNivel` do catálogo decodifica e valida esse token a cada requisição, nunca confiando em nada vindo do corpo/parâmetros da requisição do cliente
 - Toda ação restrita por papel responde **403** quando o nível é insuficiente (distinto de **401**, reservado para ausência/invalidade do token) — a checagem acontece sempre no backend, independente do que a interface mostra ou esconde
 - Toda ocorrência de **403** é registrada no log de auditoria (`log-service`), com a rota tentada e o papel atual do usuário, para permitir investigar tentativas de acesso indevido
-- Tokens de redefinição de senha gerados com `crypto.randomBytes` (aleatoriedade criptográfica), com expiração de 30 minutos e uso único
+- Tokens de redefinição de senha gerados com `crypto.randomBytes` (aleatoriedade criptográfica), com expiração de 15 minutos e uso único
 - O `auth-service` e o `log-service` não são acessíveis pela internet — não possuem porta publicada no `docker-compose.yml`, apenas a rede interna do Docker
 - O catálogo nunca recebe ou armazena o hash de senha de um usuário
 - Toda consulta a favoritos/comentários/tier list pessoal é filtrada por `usuario_id`, extraído do JWT validado
