@@ -5,13 +5,14 @@ const multer = require('multer')
 const { Readable } = require('stream')
 const db = require('./db')
 const { registrarEvento } = require('./logClient') // LOG: helper de auditoria
-const billing = require('./billing') // ASSINATURA: Stripe + chamadas internas ao auth-service
 
 const router = express.Router()
 
 const AUTH_URL = process.env.AUTH_SERVICE_URL
 const LOG_URL = process.env.LOG_SERVICE_URL // LOG: usado só na rota de consulta (proxy)
 const PROFILE_URL = process.env.PROFILE_SERVICE_URL // PERFIL: profile-service (rede interna)
+const PAGAMENTOS_URL = process.env.PAGAMENTOS_SERVICE_URL // PAGAMENTOS: pagamentos (rede interna)
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY // segredo das rotas internas (auth-service / pagamentos)
 const TAMANHO_MAXIMO_MB = Number(process.env.PROFILE_IMAGE_MAX_SIZE_MB || 5)
 
 // 'admin' é o nível 5, exclusivo do administrador do produto: herda tudo de
@@ -172,7 +173,14 @@ router.post('/auth/logout', (req, res) => {
 // token antigo ainda carrega o papel velho). A identidade vem do JWT validado, nunca do cliente.
 router.post('/auth/renovar', exigirLogin, limitadorRenovar, async (req, res) => {
   try {
-    const dados = await billing.reemitirTokenNoAuth(req.usuario.usuario_id)
+    const resposta = await fetch(`${AUTH_URL}/internos/usuarios/${req.usuario.usuario_id}/token`, {
+      method: 'POST',
+      headers: { 'x-internal-key': INTERNAL_API_KEY }
+    })
+    if (!resposta.ok) {
+      throw new Error(`auth-service respondeu ${resposta.status} ao reemitir token`)
+    }
+    const dados = await resposta.json() // { token, role }
     res.cookie('token', dados.token, OPCOES_COOKIE)
     res.json({ role: dados.role })
   } catch (err) {
@@ -491,61 +499,28 @@ router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), 
   }
 })
 
-// ---------- ASSINATURA (Stripe) ----------
+// ---------- ASSINATURA (proxy pro serviço de pagamentos) ----------
 
-// Cria uma Checkout Session pro plano pedido e devolve a URL hospedada pelo Stripe.
-// O cartão é digitado lá -- este backend nunca vê número, CVV ou validade. Quem promove o
-// usuário NÃO é esta rota nem a página de sucesso: é o webhook (ver billing.js).
-// O cliente só diz QUAL plano quer; o price_id vem do servidor (variáveis de ambiente).
+// O catalogo só autentica e repassa: Stripe, preços e a tabela assinaturas ficam no serviço
+// pagamentos. Identidade e papel vêm do JWT validado (nunca do cliente); o cliente só
+// escolhe QUAL plano quer. O webhook do Stripe também passa por aqui (ver server.js).
 router.post('/assinatura/checkout', exigirLogin, limitadorEscrita, async (req, res) => {
-  const { plano } = req.body
-  const priceId = billing.priceDoPlano(plano)
-
-  if (!priceId) {
-    return res.status(400).json({ mensagem: 'Plano inválido.' })
-  }
-
-  // admin não é plano vendável: não assina, e o webhook também nunca o rebaixa
-  if (req.usuario.role === 'admin') {
-    registrarEvento({
-      usuario_id: req.usuario.usuario_id,
-      acao: 'acesso_negado',
-      ip_origem: req.ip,
-      detalhe: `rota=${req.method} ${req.originalUrl} role_atual=admin plano=${plano}`
-    })
-    return res.status(403).json({ mensagem: 'Contas admin não assinam planos.' })
-  }
-
   try {
-    const [linhas] = await db.query(
-      'SELECT * FROM assinaturas WHERE usuario_id = ?',
-      [req.usuario.usuario_id]
-    )
-    const assinatura = linhas[0]
-
-    // só permite upgrade. O JWT pode estar defasado logo após um pagamento, então o nível
-    // efetivo considera também a assinatura ativa registrada no banco (evita cobrar em dobro)
-    const nivelPago = assinatura && assinatura.status === 'ativa' ? nivelDe(assinatura.role_pago) : -1
-    const nivelAtual = Math.max(nivelDe(req.usuario.role), nivelPago)
-
-    if (nivelDe(plano) <= nivelAtual) {
-      return res.status(409).json({ mensagem: 'Você já tem esse plano ou um superior.' })
-    }
-
-    const sessao = await billing.getStripe().checkout.sessions.create({
-      mode: 'subscription',
-      line_items: [{ price: priceId, quantity: 1 }],
-      client_reference_id: String(req.usuario.usuario_id), // o webhook usa isso pra achar o usuário
-      ...(assinatura ? { customer: assinatura.stripe_customer_id } : {}), // reaproveita o cliente
-      success_url: `${process.env.APP_URL}/assinatura-sucesso.html`,
-      cancel_url: `${process.env.APP_URL}/planos.html?cancelado=1`,
-      locale: 'pt-BR'
+    const resposta = await fetch(`${PAGAMENTOS_URL}/checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-internal-key': INTERNAL_API_KEY },
+      body: JSON.stringify({
+        usuario_id: req.usuario.usuario_id,
+        role: req.usuario.role,
+        plano: req.body.plano,
+        ip: req.ip
+      })
     })
-
-    res.json({ url: sessao.url })
+    const dados = await resposta.json()
+    res.status(resposta.status).json(dados)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ mensagem: 'Erro ao iniciar o pagamento.' })
+    res.status(502).json({ mensagem: 'Serviço de pagamentos indisponível.' })
   }
 })
 
