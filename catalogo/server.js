@@ -1,43 +1,18 @@
-require('dotenv').config()
+require('dotenv').config() // Lê as variáveis de ambiente
 
 const express = require('express')
-const cookieParser = require('cookie-parser')
-const path = require('path')
 const routes = require('./routes.js')
+const internal = require('./internal.js')
 
 const app = express()
 
-const PORTA = process.env.PORT_CATALOGO || 3000
+const PORTA = process.env.PORT_AUTH || 4000
 
-app.use(express.json())
-app.use(cookieParser())
+app.use(express.json()) // Converte o corpo das requisições em JSON, acessível via req.body
 
-function exigirLogin(req, res, next) {
-  const jwt = require('jsonwebtoken')
-  const token = req.cookies.token
-  if (!token) {
-    return res.redirect('/login.html')
-  }
-  try {
-    jwt.verify(token, process.env.JWT_SECRET)
-    next()
-  } catch (err) {
-    return res.redirect('/login.html')
-  }
-}
-
-app.get('/', (req, res) => {
-  res.redirect(req.cookies.token ? '/catalogo.html' : '/login.html')
-})
-
-app.get('/catalogo.html', exigirLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'catalogo.html'))
-})
-
-app.use(express.static(path.join(__dirname, 'public')))
-
-app.use('/api', routes)
+app.use('/internos', internal) // rotas de uso exclusivo do catalogo (exigem INTERNAL_API_KEY)
+app.use('/', routes) // Monta as rotas de auth direto na raiz (esse serviço inteiro é o auth)
 
 app.listen(PORTA, () => {
-  console.log(`Catálogo rodando na porta ${PORTA}`)
+  console.log(`Serviço de autenticação rodando na porta ${PORTA}`)
 })
