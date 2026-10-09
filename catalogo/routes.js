@@ -5,6 +5,7 @@ const multer = require('multer')
 const { Readable } = require('stream')
 const db = require('./db')
 const { registrarEvento } = require('./logClient') // LOG: helper de auditoria
+const billing = require('./billing') // ASSINATURA: Stripe + chamadas internas ao auth-service
 
 const router = express.Router()
 
@@ -75,6 +76,24 @@ const limitadorEscrita = rateLimit({
   legacyHeaders: false
 })
 
+// mesmas opções do cookie de login, reaproveitadas na renovação do token após o pagamento
+const OPCOES_COOKIE = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'strict',
+  maxAge: 1 * 15 * 60 * 1000
+}
+
+// a página de sucesso consulta /auth/renovar em loop curto enquanto espera o webhook:
+// limite próprio, mais folgado que o de escrita
+const limitadorRenovar = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { mensagem: 'Muitas requisições. Aguarde um momento.' },
+  standardHeaders: true,
+  legacyHeaders: false
+})
+
 const uploadFoto = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: TAMANHO_MAXIMO_MB * 1024 * 1024 }
@@ -120,12 +139,7 @@ router.post('/auth/login', async (req, res) => {
       return res.status(resposta.status).json(dados)
     }
 
-    res.cookie('token', dados.token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'strict',
-      maxAge: 1*15*60*1000
-    })
+    res.cookie('token', dados.token, OPCOES_COOKIE)
 
     res.json({ mensagem: 'Login realizado com sucesso.' })
 
@@ -152,6 +166,19 @@ router.post('/auth/logout', (req, res) => {
 
   res.clearCookie('token')
   res.json({ mensagem: 'Logout realizado.' })
+})
+
+// ASSINATURA: reemite o JWT com o papel ATUAL do banco (útil logo após o pagamento, quando o
+// token antigo ainda carrega o papel velho). A identidade vem do JWT validado, nunca do cliente.
+router.post('/auth/renovar', exigirLogin, limitadorRenovar, async (req, res) => {
+  try {
+    const dados = await billing.reemitirTokenNoAuth(req.usuario.usuario_id)
+    res.cookie('token', dados.token, OPCOES_COOKIE)
+    res.json({ role: dados.role })
+  } catch (err) {
+    console.error(err)
+    res.status(502).json({ mensagem: 'Serviço de autenticação indisponível.' })
+  }
 })
 
 router.post('/auth/esqueci-senha', async (req, res) => {
@@ -461,6 +488,64 @@ router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), 
   } catch (err) {
     console.error(err)
     res.status(500).json({ mensagem: 'Erro ao remover filme.' })
+  }
+})
+
+// ---------- ASSINATURA (Stripe) ----------
+
+// Cria uma Checkout Session pro plano pedido e devolve a URL hospedada pelo Stripe.
+// O cartão é digitado lá -- este backend nunca vê número, CVV ou validade. Quem promove o
+// usuário NÃO é esta rota nem a página de sucesso: é o webhook (ver billing.js).
+// O cliente só diz QUAL plano quer; o price_id vem do servidor (variáveis de ambiente).
+router.post('/assinatura/checkout', exigirLogin, limitadorEscrita, async (req, res) => {
+  const { plano } = req.body
+  const priceId = billing.priceDoPlano(plano)
+
+  if (!priceId) {
+    return res.status(400).json({ mensagem: 'Plano inválido.' })
+  }
+
+  // admin não é plano vendável: não assina, e o webhook também nunca o rebaixa
+  if (req.usuario.role === 'admin') {
+    registrarEvento({
+      usuario_id: req.usuario.usuario_id,
+      acao: 'acesso_negado',
+      ip_origem: req.ip,
+      detalhe: `rota=${req.method} ${req.originalUrl} role_atual=admin plano=${plano}`
+    })
+    return res.status(403).json({ mensagem: 'Contas admin não assinam planos.' })
+  }
+
+  try {
+    const [linhas] = await db.query(
+      'SELECT * FROM assinaturas WHERE usuario_id = ?',
+      [req.usuario.usuario_id]
+    )
+    const assinatura = linhas[0]
+
+    // só permite upgrade. O JWT pode estar defasado logo após um pagamento, então o nível
+    // efetivo considera também a assinatura ativa registrada no banco (evita cobrar em dobro)
+    const nivelPago = assinatura && assinatura.status === 'ativa' ? nivelDe(assinatura.role_pago) : -1
+    const nivelAtual = Math.max(nivelDe(req.usuario.role), nivelPago)
+
+    if (nivelDe(plano) <= nivelAtual) {
+      return res.status(409).json({ mensagem: 'Você já tem esse plano ou um superior.' })
+    }
+
+    const sessao = await billing.getStripe().checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: priceId, quantity: 1 }],
+      client_reference_id: String(req.usuario.usuario_id), // o webhook usa isso pra achar o usuário
+      ...(assinatura ? { customer: assinatura.stripe_customer_id } : {}), // reaproveita o cliente
+      success_url: `${process.env.APP_URL}/assinatura-sucesso.html`,
+      cancel_url: `${process.env.APP_URL}/planos.html?cancelado=1`,
+      locale: 'pt-BR'
+    })
+
+    res.json({ url: sessao.url })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ mensagem: 'Erro ao iniciar o pagamento.' })
   }
 })
 
