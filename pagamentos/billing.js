@@ -2,8 +2,14 @@ const Stripe = require('stripe')
 const db = require('./db')
 const { registrarEvento } = require('./logClient') // LOG: helper de auditoria (cópia do auth-service)
 
-// planos vendáveis. 'espectador' é gratuito (sem Stripe) e 'admin' nunca é vendido.
+// planos vendáveis, em ordem crescente de nível. 'espectador' é gratuito (sem Stripe)
+// e 'admin' nunca é vendido.
 const PLANOS_PAGOS = ['fan', 'cinefilo', 'stalker']
+
+// assinaturas que dão acesso ao plano (past_due = renovação falhou, mas o Stripe ainda
+// está tentando cobrar). 'unpaid' também entra na limpeza de assinaturas antigas.
+const STATUS_COM_ACESSO = ['active', 'trialing', 'past_due']
+const STATUS_A_CANCELAR = [...STATUS_COM_ACESSO, 'unpaid']
 
 // Cliente criado só no primeiro uso: sem STRIPE_SECRET_KEY (ex: no CI) o serviço
 // continua subindo normalmente; só falha quando alguém tenta de fato cobrar.
@@ -35,6 +41,33 @@ function planoDoPrice(priceId) {
   return PLANOS_PAGOS.find(plano => priceDoPlano(plano) === priceId) || null
 }
 
+// ---------- o Stripe é a fonte da verdade sobre o plano ----------
+// O banco só guarda QUEM é o cliente no Stripe (clientes_stripe). Quais assinaturas ele
+// tem, e de que plano, é sempre perguntado ao Stripe.
+
+async function listarAssinaturas(clienteId) {
+  const lista = await getStripe().subscriptions.list({ customer: clienteId, status: 'all', limit: 100 })
+  return lista.data
+}
+
+// Maior papel pago entre as assinaturas COM ACESSO do cliente; 'espectador' se não houver.
+// `ignorarId` tira uma assinatura da conta (a que acabou de ser cancelada).
+async function papelPagoAtual(clienteId, ignorarId = null) {
+  const assinaturas = await listarAssinaturas(clienteId)
+  let melhor = 'espectador'
+
+  for (const assinatura of assinaturas) {
+    if (assinatura.id === ignorarId) continue
+    if (!STATUS_COM_ACESSO.includes(assinatura.status)) continue
+
+    const role = planoDoPrice(assinatura.items.data[0].price.id)
+    if (role && PLANOS_PAGOS.indexOf(role) > PLANOS_PAGOS.indexOf(melhor)) {
+      melhor = role
+    }
+  }
+  return melhor
+}
+
 // ---------- chamada interna ao auth-service (dono da tabela usuarios) ----------
 
 // Retorna true se aplicou; false se o caso não tem como dar certo nem com retry
@@ -62,17 +95,16 @@ async function definirRoleNoAuth(usuarioId, role) {
 
 // ---------- webhook ----------
 
-// Cancela toda assinatura ativa do cliente que NÃO seja a nova. Stateless de propósito:
-// se uma tentativa anterior falhou no meio, o retry do Stripe simplesmente encontra o que
-// ainda sobrou. Qualquer falha diferente de "não existe" lança erro (cobrança em dobro
-// não pode ser engolida em silêncio).
+// Cancela toda assinatura do cliente que NÃO seja a nova. Stateless de propósito: se uma
+// tentativa anterior falhou no meio, o retry do Stripe simplesmente encontra o que ainda
+// sobrou. Qualquer falha diferente de "não existe" lança erro (cobrança em dobro não pode
+// ser engolida em silêncio).
 async function cancelarAssinaturasAnteriores(clienteId, assinaturaAtualId) {
   const stripe = getStripe()
-  const lista = await stripe.subscriptions.list({ customer: clienteId, status: 'all', limit: 100 })
 
-  for (const assinatura of lista.data) {
+  for (const assinatura of await listarAssinaturas(clienteId)) {
     if (assinatura.id === assinaturaAtualId) continue
-    if (!['active', 'trialing', 'past_due', 'unpaid'].includes(assinatura.status)) continue
+    if (!STATUS_A_CANCELAR.includes(assinatura.status)) continue
 
     try {
       await stripe.subscriptions.cancel(assinatura.id)
@@ -102,20 +134,16 @@ async function tratarCheckoutConcluido(sessao, ip) {
     return
   }
 
-  // ORDEM IMPORTA: 1) grava a nova assinatura como a atual, 2) promove, 3) só então cancela
-  // a antiga. Assim o customer.subscription.deleted da antiga chega depois e é ignorado
-  // (ela já não é a atual). Cada passo é idempotente: se o Stripe reenviar o evento, refaz.
+  // 1) guarda o vínculo usuário <-> cliente do Stripe (único dado nosso sobre pagamento)
   await db.query(
-    `INSERT INTO assinaturas (usuario_id, stripe_customer_id, stripe_subscription_id, role_pago, status)
-     VALUES (?, ?, ?, ?, 'ativa')
-     ON DUPLICATE KEY UPDATE
-       stripe_customer_id = VALUES(stripe_customer_id),
-       stripe_subscription_id = VALUES(stripe_subscription_id),
-       role_pago = VALUES(role_pago),
-       status = 'ativa'`,
-    [usuarioId, sessao.customer, assinatura.id, role]
+    `INSERT INTO clientes_stripe (usuario_id, stripe_customer_id)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE stripe_customer_id = VALUES(stripe_customer_id)`,
+    [usuarioId, sessao.customer]
   )
 
+  // 2) promove e 3) cancela as assinaturas anteriores. Cada passo é idempotente: se o
+  // Stripe reenviar o evento, refaz sem efeito colateral.
   await definirRoleNoAuth(usuarioId, role)
   await cancelarAssinaturasAnteriores(sessao.customer, assinatura.id)
 
@@ -128,30 +156,27 @@ async function tratarCheckoutConcluido(sessao, ip) {
 }
 
 async function tratarAssinaturaCancelada(assinatura, ip) {
-  // só age se for a assinatura ATUAL do usuário. Cancelamento de uma assinatura já
-  // substituída por upgrade não rebaixa ninguém.
   const [linhas] = await db.query(
-    "SELECT * FROM assinaturas WHERE stripe_subscription_id = ? AND status = 'ativa'",
-    [assinatura.id]
+    'SELECT usuario_id FROM clientes_stripe WHERE stripe_customer_id = ?',
+    [assinatura.customer]
   )
-  const registro = linhas[0]
-  if (!registro) return
+  const cliente = linhas[0]
+  if (!cliente) return // cliente que não conhecemos (ex: promovido manualmente)
 
-  // papel primeiro, status depois: se o segundo passo falhar, o retry refaz o primeiro
-  // (idempotente) em vez de deixar o usuário premium pra sempre
-  await definirRoleNoAuth(registro.usuario_id, 'espectador')
+  // Em vez de olhar um status guardado, pergunta ao Stripe o que SOBROU. Num upgrade, a
+  // assinatura antiga é cancelada mas a nova continua ativa: o papel resultante é o do
+  // plano novo, e ninguém é rebaixado por engano. Sem nenhuma assinatura ativa -> espectador.
+  const role = await papelPagoAtual(assinatura.customer, assinatura.id)
+  await definirRoleNoAuth(cliente.usuario_id, role)
 
-  await db.query(
-    "UPDATE assinaturas SET status = 'cancelada' WHERE stripe_subscription_id = ?",
-    [assinatura.id]
-  )
-
-  registrarEvento({
-    usuario_id: registro.usuario_id,
-    acao: 'assinatura_cancelada',
-    ip_origem: ip,
-    detalhe: `plano=${registro.role_pago} subscription=${assinatura.id}`
-  })
+  if (role === 'espectador') {
+    registrarEvento({
+      usuario_id: cliente.usuario_id,
+      acao: 'assinatura_cancelada',
+      ip_origem: ip,
+      detalhe: `subscription=${assinatura.id}`
+    })
+  }
 }
 
 // Recebe o corpo CRU (Buffer), repassado byte a byte pelo catalogo: a assinatura do Stripe
@@ -192,5 +217,6 @@ async function webhookHandler(req, res) {
 module.exports = {
   getStripe,
   priceDoPlano,
+  papelPagoAtual,
   webhookHandler
 }

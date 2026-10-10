@@ -69,13 +69,14 @@ router.post('/checkout', express.json(), async (req, res) => {
   }
 
   try {
-    const [linhas] = await db.query('SELECT * FROM assinaturas WHERE usuario_id = ?', [usuarioId])
-    const assinatura = linhas[0]
+    // o banco só diz QUEM é o cliente no Stripe; o plano em si é perguntado ao Stripe
+    const [linhas] = await db.query('SELECT stripe_customer_id FROM clientes_stripe WHERE usuario_id = ?', [usuarioId])
+    const clienteId = linhas[0] ? linhas[0].stripe_customer_id : null
 
     // só permite upgrade. O JWT pode estar defasado logo após um pagamento, então o nível
-    // efetivo considera também a assinatura ativa registrada no banco (evita cobrar em dobro)
-    const nivelPago = assinatura && assinatura.status === 'ativa' ? nivelDe(assinatura.role_pago) : -1
-    const nivelAtual = Math.max(nivelDe(role), nivelPago)
+    // efetivo considera também as assinaturas ativas no Stripe (evita cobrar em dobro)
+    const rolePago = clienteId ? await billing.papelPagoAtual(clienteId) : 'espectador'
+    const nivelAtual = Math.max(nivelDe(role), nivelDe(rolePago))
 
     if (nivelDe(plano) <= nivelAtual) {
       return res.status(409).json({ mensagem: 'Você já tem esse plano ou um superior.' })
@@ -85,7 +86,7 @@ router.post('/checkout', express.json(), async (req, res) => {
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
       client_reference_id: String(usuarioId), // o webhook usa isso pra achar o usuário
-      ...(assinatura ? { customer: assinatura.stripe_customer_id } : {}), // reaproveita o cliente
+      ...(clienteId ? { customer: clienteId } : {}), // reaproveita o cliente do Stripe
       success_url: `${process.env.APP_URL}/assinatura-sucesso.html`,
       cancel_url: `${process.env.APP_URL}/planos.html?cancelado=1`,
       locale: 'pt-BR'
