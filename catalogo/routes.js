@@ -501,7 +501,7 @@ router.delete('/tier-list/:tmdb_movie_id', exigirLogin, exigirNivel('stalker'), 
 
 // ---------- ASSINATURA (proxy pro serviço de pagamentos) ----------
 
-// O catalogo só autentica e repassa: Stripe, preços e a tabela assinaturas ficam no serviço
+// O catalogo só autentica e repassa: Stripe, preços e a tabela clientes_stripe ficam no serviço
 // pagamentos. Identidade e papel vêm do JWT validado (nunca do cliente); o cliente só
 // escolhe QUAL plano quer. O webhook do Stripe também passa por aqui (ver server.js).
 router.post('/assinatura/checkout', exigirLogin, limitadorEscrita, async (req, res) => {
