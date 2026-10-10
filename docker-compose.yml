@@ -9,6 +9,7 @@ services:
       - auth-service
       - log-service
       - profile-service
+      - pagamentos
 
   auth-service:
     build: ./auth-service
@@ -16,6 +17,17 @@ services:
     env_file: .env
     depends_on:
       - log-service
+
+  pagamentos:
+    build: ./pagamentos
+    image: igorrueda/api-tom-hanks-microserv-pagamentos:latest
+    # sem "ports:" -- só o catalogo fala com ele (checkout e webhook do Stripe entram
+    # pelo catalogo, que repassa pela rede interna). Guarda a chave do Stripe.
+    env_file: .env
+    depends_on:
+      - auth-service
+      - log-service
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -42,7 +54,7 @@ services:
     # extra publicada aqui não é estável (testado e confirmado). Quem fala com o Garage
     # é só o profile-service, pela rede interna do Docker.
     volumes:
-      - /opt/garage/garage.toml:/etc/garage.toml:ro
+      - ./upload-profile/garage/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
     restart: unless-stopped
