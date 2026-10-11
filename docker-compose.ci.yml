@@ -53,3 +53,19 @@ services:
         condition: service_healthy
       log-service:
         condition: service_started
+
+  # pagamentos usa o mesmo MariaDB efêmero. As chaves do Stripe vêm do .env.ci (valores
+  # fake): no CI não há cobrança de verdade, só se testa o caminho do webhook e as rotas.
+  pagamentos:
+    environment:
+      - DB_HOST=mariadb
+      - DB_USER=catalogo_test
+      - DB_PASSWORD=teste
+      - DB_NAME=catalogo_test
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      log-service:
+        condition: service_started

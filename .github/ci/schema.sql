@@ -54,3 +54,10 @@ CREATE TABLE IF NOT EXISTS tier_list (
   UNIQUE (usuario_id, tmdb_movie_id)
 );
 
+CREATE TABLE clientes_stripe (
+  usuario_id         INT PRIMARY KEY,
+  stripe_customer_id VARCHAR(64) NOT NULL UNIQUE,
+  criado_em          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
