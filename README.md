@@ -1,8 +1,10 @@
 # Catálogo de Filmes — Tom Hanks
 
-Aplicação web de catálogo de filmes com Tom Hanks, consumindo a API do [TMDB](https://www.themoviedb.org/documentation/api) em tempo real. Usuários podem se cadastrar, fazer login, favoritar filmes, comentar e montar suas próprias tier lists — tudo isolado por conta, com persistência em MariaDB.
+Aplicação web de catálogo de filmes com Tom Hanks, consumindo a API do [TMDB](https://www.themoviedb.org/documentation/api) (com cache em memória de 1 hora na lista de filmes). Usuários podem se cadastrar, fazer login, favoritar filmes, comentar e montar suas próprias tier lists — tudo isolado por conta, com persistência em MariaDB.
 
 A aplicação é dividida em **cinco serviços independentes**: um catálogo público, um serviço de autenticação isolado, um serviço de log de auditoria isolado, um serviço de perfil/upload de foto isolado e um serviço de pagamentos (Stripe) isolado — os quatro últimos não são acessíveis diretamente pela internet. O controle de acesso segue o modelo **RBAC** (Role-Based Access Control), com 5 papéis hierárquicos e permissões crescentes.
+
+> **Para quem está herdando este projeto:** a classificação SaaS/PaaS/IaaS, a especificação, a arquitetura, as regras de negócio extraídas do código e o modelo de dados estão na seção [Documentação do sistema](#documentação-do-sistema-engenharia-reversa).
 
 Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 
@@ -10,8 +12,8 @@ Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 
 - Cadastro e login próprios da aplicação, com sessão via **JWT em cookie httpOnly**
 - 5 papéis de usuário hierárquicos (`espectador` < `fan` < `cinefilo` < `stalker` < `admin`), cada um herdando as permissões do anterior
-- Recuperação de senha por e-mail, com token de expiração de 30 minutos e uso único.
-- Listagem de filmes com Tom Hanks, buscados ao vivo na API do TMDB (pôster, título e sinopse nunca são salvos localmente)
+- Recuperação de senha por e-mail, com token de expiração de 30 minutos e uso único
+- Listagem de filmes com Tom Hanks, buscados na API do TMDB, com cache em memória de 1 hora — a lista é igual para todos, então não precisa ser rebuscada a cada acesso (pôster, título e sinopse nunca são salvos no banco; favoritos e comentários, que são por usuário, nunca passam pelo cache)
 - Contagem pública de favoritos por filme, visível a qualquer usuário logado
 - Favoritar / desfavoritar filmes e comentar (a partir do papel `fan`)
 - Ver os comentários de todos os usuários, não só os próprios (a partir do papel `cinefilo`)
@@ -108,8 +110,6 @@ https://github.com/Igor-RR/API-Tom-Hanks/actions/runs/35413640888
 
 - **Tentativa (recusada) de editar o perfil de outro usuário** — a requisição recebe `403` e o perfil alvo permanece intacto:
 ![alt text](test-pictures/teste-403-editar-perfil-outro-usuario.png)
-
-
 
 ## Arquitetura
 
@@ -696,7 +696,7 @@ Localmente, os serviços leem o mesmo arquivo `.env` na raiz (o Docker Compose r
 - O papel (`role`) do usuário vem embutido no JWT assinado pelo `auth-service`; o middleware `exigirNivel` do catálogo decodifica e valida esse token a cada requisição, nunca confiando em nada vindo do corpo/parâmetros da requisição do cliente
 - Toda ação restrita por papel responde **403** quando o nível é insuficiente (distinto de **401**, reservado para ausência/invalidade do token) — a checagem acontece sempre no backend, independente do que a interface mostra ou esconde
 - Toda ocorrência de **403** é registrada no log de auditoria (`log-service`), com a rota tentada e o papel atual do usuário, para permitir investigar tentativas de acesso indevido
-- Tokens de redefinição de senha gerados com `crypto.randomBytes` (aleatoriedade criptográfica), com expiração de 15 minutos e uso único
+- Tokens de redefinição de senha gerados com `crypto.randomBytes` (aleatoriedade criptográfica), com expiração de 30 minutos e uso único
 - O `auth-service` e o `log-service` não são acessíveis pela internet — não possuem porta publicada no `docker-compose.yml`, apenas a rede interna do Docker
 - O catálogo nunca recebe ou armazena o hash de senha de um usuário
 - Toda consulta a favoritos/comentários/tier list pessoal é filtrada por `usuario_id`, extraído do JWT validado
@@ -920,3 +920,314 @@ Pontos importantes:
 - **O bootstrap do Garage (`init-garage.sh`) precisa ser rodado contra a instância de produção**, não a local — cada instância do Garage tem seu próprio estado interno, então a chave gerada localmente não é reconhecida pelo Garage rodando no servidor. Como o Console do Portainer não dá acesso a um shell dentro da imagem do Garage (ela não tem `/bin/sh`), os comandos (`layout assign`, `bucket create`, `key create`...) são rodados um por vez, direto com `/garage -c /config/garage.toml <comando>` no campo "Command" do Console.
 - Após qualquer mudança de código, é necessário `docker compose build && docker compose push` local, seguido de **"Re-pull image and redeploy"** na stack do Portainer.
 - Após qualquer mudança apenas nas variáveis de ambiente ou no `docker-compose.yml` (sem mudança de código), basta **"Update the stack"** no Portainer.
+
+
+## Documentação do sistema (engenharia reversa)
+
+Esta seção foi escrita como se o projeto tivesse sido herdado de outra pessoa, **sem documentação**: o que está aqui foi levantado lendo o código e o banco, não de memória. Cada regra da seção 4 indica o arquivo de onde veio, para quem precisar conferir (ou contestar) antes de mexer.
+
+### 1. Classificação SaaS / PaaS / IaaS
+
+A pergunta de cada linha é a mesma: **quem cuida de quê?** O projeto atravessa as três camadas ao mesmo tempo.
+
+| Peça | Camada | Quem gerencia o quê | Por quê |
+|---|---|---|---|
+| VM da disciplina (Ubuntu + Docker) | **IaaS** | Provedor: hardware e virtualização. Nós: sistema operacional e Docker | Recebemos uma máquina virtual "crua"; instalar e atualizar o SO e o Docker é responsabilidade de quem opera a infraestrutura |
+| Containers `catalogo`, `auth-service`, `log-service`, `profile-service`, `pagamentos`, `redis` e `garage`, implantados pelo Portainer | **PaaS** | Plataforma: SO, runtime de containers e roteamento. Nós: imagem e variáveis de ambiente | O deploy é publicar a imagem no Docker Hub e fazer *Re-pull image and redeploy*; ninguém reinstala SO a cada versão. A hospedagem só roteia a porta do `catalogo` e a conta do Portainer não é administradora — sinais de plataforma gerenciada |
+| MariaDB remoto | **PaaS** (banco como serviço) | Provedor: servidor e SO do banco. Nós: tabelas e dados | O projeto só recebe host, usuário e senha; não instala nem atualiza o servidor de banco |
+| Stripe | **SaaS** | Stripe: tudo, inclusive os dados de cartão | Cobrança e assinaturas consumidas por API e painel; nenhum dado de cartão passa pelo nosso sistema |
+| Gmail SMTP | **SaaS** | Google: servidor, entrega e reputação do e-mail | Só usamos uma conta e uma senha de aplicativo para o e-mail de redefinição de senha |
+| TMDB (API de filmes) | **SaaS** | TMDB: dados de filmes, pôsteres e sinopses | Consumimos pela API com uma chave; nada disso é guardado no nosso banco |
+| Docker Hub | **SaaS** | Docker: armazenamento e distribuição das imagens | Registry de imagens usado pelo pipeline e pelo Portainer |
+| GitHub e GitHub Actions | **SaaS** | GitHub: repositório e máquinas que rodam o CI/CD | O pipeline roda na infraestrutura do GitHub, não na nossa |
+| Cloudflare | **SaaS** | Cloudflare: proxy/CDN na frente do domínio público | Aparece na página de erro `502` do domínio do projeto |
+
+> **Redis e Garage não são SaaS**, mesmo sendo "serviços": são softwares open source que **nós** rodamos em containers (PaaS). SaaS seria contratar um Redis ou um S3 prontos de um provedor, sem hospedá-los.
+
+### 2. Especificação (o que o sistema faz)
+
+#### Visão geral
+
+Aplicação web de catálogo de filmes do **Tom Hanks** (a busca na TMDB é fixa nesse nome). Os filmes vêm da API da TMDB; o que é guardado no nosso banco é só o que pertence aos usuários: contas, favoritos, comentários, tier lists, perfil e o vínculo com o Stripe. Toda a interação é protegida por login, e o que cada pessoa pode fazer depende do **papel** dela.
+
+#### Quem usa o sistema
+
+| Papel | Quem é | O que consegue fazer |
+|---|---|---|
+| `espectador` | Todo usuário novo (plano gratuito) | Ver filmes, contagem de favoritos, tier lists e perfis |
+| `fan` | Plano pago (R$ 9,90/mês) | Tudo acima, e favoritar, comentar, apagar os próprios comentários e ver os próprios comentários |
+| `cinefilo` | Plano pago (R$ 29,90/mês) | Tudo acima, e ver os comentários de todos |
+| `stalker` | Plano pago (R$ 99,90/mês) | Tudo acima, e apagar qualquer comentário (moderação) e montar a própria tier list |
+| `admin` | Administrador do produto; não é vendável | Tudo acima, e consultar o log de auditoria |
+
+#### Funcionalidades, na visão de quem usa
+
+- **Conta.** A pessoa se cadastra com nome, e-mail e senha e entra como `espectador`. Faz login e a sessão dura 15 minutos. Pode sair a qualquer momento. Se esquecer a senha, recebe por e-mail um link que vale 30 minutos e só pode ser usado uma vez.
+- **Catálogo.** A tela principal mostra um card por filme, com pôster, título, sinopse e quantas pessoas o favoritaram. Os filmes são buscados na TMDB e ficam em cache por 1 hora.
+- **Favoritos.** A partir do `fan`, cada card tem um botão para favoritar e desfavoritar. O contador de todos os usuários é visível para qualquer pessoa logada.
+- **Comentários.** A partir do `fan`, a pessoa comenta nos filmes e apaga os próprios comentários. O `fan` só enxerga os próprios; o `cinefilo` em diante enxerga os de todos; o `stalker` em diante apaga os de qualquer pessoa.
+- **Tier list.** O `stalker` classifica filmes nos níveis S, A, B, C e D e mantém uma lista pessoal. Qualquer pessoa logada pode navegar pelas tier lists dos stalkers; só o dono edita a sua.
+- **Perfil e avatar.** Cada pessoa tem uma página com nome, foto, bio de até 280 caracteres e a lista de filmes que favoritou. Qualquer pessoa logada vê o perfil de qualquer outra, mas só o dono edita o seu. A foto aceita JPEG, PNG e WebP.
+- **Planos e assinatura.** A página de Planos mostra os quatro papéis e destaca o atual. Quem quer subir assina um plano pago numa página de pagamento hospedada pelo Stripe; depois do pagamento, o papel muda sozinho, sem novo login. Só é possível subir de plano. O cancelamento é feito pelo painel do Stripe, e ao cancelar a pessoa volta a `espectador`.
+- **Auditoria (admin).** O `admin` consulta o histórico de eventos: logins, logouts, favoritos, comentários, moderações e toda tentativa de ação sem permissão.
+- **Bloqueio visível.** Um recurso fora do plano continua aparecendo na tela, mas abre um aviso de upgrade em vez de agir. A trava real está sempre no servidor.
+
+#### O que o sistema não faz (limites atuais)
+
+Não há tela para administrar papéis (a promoção manual é direto no banco), nem para cancelar assinatura ou fazer downgrade. Não é possível editar um comentário, trocar nome ou e-mail, nem excluir a própria conta. Não há reembolso proporcional num upgrade.
+
+### 3. Arquitetura
+
+O `catalogo` é o **único** serviço acessível pela internet. Todos os outros ficam na rede interna do Docker, sem porta publicada, e só são alcançados por ele.
+
+```mermaid
+flowchart LR
+    nav(["Navegador"])
+
+    subgraph VM["VM Docker + Portainer: containers do projeto"]
+        direction LR
+        cat["catalogo<br/>único com porta pública<br/>front + API + RBAC"]
+        aut["auth-service<br/>usuários, login, JWT"]
+        log["log-service<br/>auditoria"]
+        per["profile-service<br/>bio e foto"]
+        pag["pagamentos<br/>integração com o Stripe"]
+        red[("Redis<br/>stream logs:eventos")]
+        gar[("Garage S3<br/>bucket avatars")]
+    end
+
+    db[("MariaDB<br/>remoto")]
+    tmdb["TMDB API"]
+    smtp["Gmail SMTP"]
+    str["Stripe"]
+
+    nav -->|"HTTPS"| cat
+    str -.->|"webhook"| cat
+    cat -->|"cadastro, login, senha,<br/>renovar token"| aut
+    cat -->|"consulta de logs (admin)<br/>e eventos de auditoria"| log
+    cat -->|"bio e foto"| per
+    cat -->|"checkout e webhook"| pag
+    cat --> db
+    cat --> tmdb
+    aut --> db
+    aut --> smtp
+    aut -->|"eventos"| log
+    log --> red
+    per --> db
+    per --> gar
+    pag -->|"define o papel"| aut
+    pag --> db
+    pag --> str
+    pag -->|"eventos"| log
+
+    classDef saas fill:#e8f1ff,stroke:#3b6fd4
+    class tmdb,smtp,str saas
+```
+
+*Em azul, os serviços de terceiros (SaaS). O `catalogo` não acessa a tabela de usuários, e só o `log-service` fala com o Redis.*
+
+| Serviço | Exposição | Responsabilidade | Dados que possui | Depende de |
+|---|---|---|---|---|
+| `catalogo` | Pública | Páginas, API, validação do JWT, controle de acesso por papel, proxy para os demais | `favoritos`, `comentarios`, `tier_list` | `auth-service`, `log-service`, `profile-service`, `pagamentos`, TMDB, MariaDB |
+| `auth-service` | Interna | Cadastro, login, emissão do JWT, redefinição de senha, rotas internas de papel e token | `usuarios`, `reset_tokens` | MariaDB, SMTP, `log-service` |
+| `log-service` | Interna | Receber e consultar eventos de auditoria | Stream `logs:eventos` no Redis | Redis |
+| `profile-service` | Interna | Bio e foto de perfil | `perfis` e o bucket `avatars` | MariaDB, Garage |
+| `pagamentos` | Interna | Checkout, assinaturas e webhook do Stripe | `clientes_stripe` | Stripe, `auth-service`, MariaDB, `log-service` |
+
+**Fluxos que cruzam serviços**
+
+- **Login:** o navegador chama o `catalogo`, que repassa ao `auth-service`; ele devolve um JWT, e o `catalogo` o guarda num cookie `httpOnly`.
+- **Ação restrita:** o `catalogo` lê o papel do JWT e decide. Se negar, responde `403` e dispara um evento `acesso_negado` ao `log-service`, sem esperar a resposta dele.
+- **Foto:** o navegador pede ao `catalogo`, que busca no `profile-service`, que busca no Garage e devolve os bytes. O Garage nunca é exposto.
+- **Pagamento:** o `pagamentos` cria a sessão no Stripe; depois do pagamento, o Stripe avisa por webhook (entrando pelo `catalogo`), e o `pagamentos` manda o `auth-service` mudar o papel.
+
+### 4. Regras de negócio
+
+Extraídas do código. A coluna **Origem** é o arquivo onde a regra é imposta hoje. Onde está `(README)`, a regra vem da documentação do serviço e ainda não foi conferida contra o código-fonte dele.
+
+#### Conta e autenticação
+
+| Se | Então | Origem |
+|---|---|---|
+| Nome, e-mail ou senha faltam no cadastro | `400` | `auth-service/routes.js` |
+| O e-mail não tem formato válido (`algo@dominio.ext`) | `400` | `auth-service/routes.js` |
+| A senha tem menos de 6 caracteres (cadastro ou redefinição) | `400` | `auth-service/routes.js` |
+| O cadastro é válido | A conta nasce como `espectador` e a senha é guardada só como hash bcrypt (custo 10) | `auth-service/routes.js` |
+| O e-mail já está cadastrado | `409` | `auth-service/routes.js` |
+| O e-mail não existe **ou** a senha está errada no login | `401` com a **mesma** mensagem, sem revelar qual dos dois falhou | `auth-service/routes.js` |
+| O login é válido | Emite um JWT com `usuario_id`, `nome` e `role`, válido por 15 minutos; o `catalogo` o guarda em cookie `httpOnly`, `secure`, `sameSite strict`, também de 15 minutos | `auth-service/routes.js`, `catalogo/routes.js` |
+| Há mais de 5 tentativas de login ou de "esqueci a senha" em 15 minutos | `429`. O mesmo contador vale para as duas rotas | `auth-service/routes.js` |
+| Alguém pede redefinição de senha | A resposta é sempre a mesma ("se esse e-mail existir…"), exista ou não; só se existir é gerado o token | `auth-service/routes.js` |
+| O token de redefinição é gerado | É aleatório (32 bytes), vale **30 minutos** e é de uso único | `auth-service/routes.js` |
+| O token de redefinição não existe, já foi usado ou expirou | `400`, com mensagem diferente para cada caso | `auth-service/routes.js` |
+| O usuário faz logout | O cookie é apagado e o evento `logout` é registrado | `catalogo/routes.js` |
+| Não há cookie, ou o JWT é inválido ou expirou | `401` (e a página do catálogo redireciona para o login) | `catalogo/routes.js`, `catalogo/server.js` |
+
+#### Acesso por papel
+
+A hierarquia é `espectador` < `fan` < `cinefilo` < `stalker` < `admin`, e o papel é sempre lido do **JWT assinado**, nunca de algo enviado pelo cliente.
+
+| Se | Então | Origem |
+|---|---|---|
+| O papel do usuário está abaixo do exigido pela rota | `403` e registro do evento `acesso_negado` (rota, papel atual e nível exigido) | `catalogo/routes.js` |
+| O usuário está logado, mesmo como `espectador` | Pode listar filmes, ver a contagem de favoritos, ver tier lists e ver perfis e fotos | `catalogo/routes.js` |
+| O usuário é `fan` ou acima | Pode favoritar, desfavoritar, listar os próprios favoritos e comentar | `catalogo/routes.js` |
+| O usuário é `fan` | Só enxerga os próprios comentários | `catalogo/routes.js` |
+| O usuário é `cinefilo` ou acima | Enxerga os comentários de todos | `catalogo/routes.js` |
+| O usuário é `stalker` ou acima | Pode apagar qualquer comentário (evento `comentario_deletado_moderacao`) e criar, editar e remover a própria tier list | `catalogo/routes.js` |
+| O usuário é `admin` | Único que consulta `GET /api/logs`; um `stalker` recebe `403` | `catalogo/routes.js` |
+
+#### Favoritos, comentários e tier list
+
+| Se | Então | Origem |
+|---|---|---|
+| Faltam `tmdb_movie_id` ou `titulo` ao favoritar | `400` | `catalogo/routes.js` |
+| O filme já está nos favoritos do usuário | `409` (garantido por restrição única no banco) | `catalogo/routes.js`, schema |
+| O usuário desfavorita | Só remove o favorito **dele**: o `usuario_id` vem do JWT | `catalogo/routes.js` |
+| Faltam `tmdb_movie_id` ou `texto` ao comentar | `400` | `catalogo/routes.js` |
+| O usuário apaga o próprio comentário e o `id` não é dele (ou não existe) | `404`, nada é apagado | `catalogo/routes.js` |
+| Um favorito ou comentário é criado com sucesso | Gera os eventos `favoritar` ou `comentar` | `catalogo/routes.js` |
+| Faltam `titulo` ou `tier` ao classificar um filme | `400` | `catalogo/routes.js` |
+| Um `stalker` classifica um filme que já classificou | Atualiza a classificação em vez de duplicar (restrição única por usuário e filme) | `catalogo/routes.js`, schema |
+| A tier list é lida ou editada | A dona é sempre a do JWT; as rotas de escrita nunca aceitam outro `usuario_id` | `catalogo/routes.js` |
+
+#### Perfil e foto
+
+| Se | Então | Origem |
+|---|---|---|
+| O `:usuario_id` da URL é diferente do `usuario_id` do JWT ao editar bio ou foto | `403` e evento `acesso_negado` | `catalogo/routes.js` |
+| A bio passa de 280 caracteres | Recusada | `profile-service` (README) |
+| A foto não é JPEG, PNG ou WebP (o tipo é lido pelos bytes do arquivo, não pela extensão) | `415` | `profile-service` (README) |
+| A foto é maior que o limite (`PROFILE_IMAGE_MAX_SIZE_MB`, padrão 5 MB) | `413` | `catalogo/routes.js` |
+| O upload não traz o campo `foto` | `400` | `catalogo/routes.js` |
+| O dono abre o próprio perfil | O nome dele é copiado para o `profile-service` (cópia denormalizada, em segundo plano) | `catalogo/routes.js` |
+| A foto é exibida | Passa sempre pelo `catalogo` (bucket privado, sem URL pública), com cache privado de 60 segundos | `catalogo/routes.js` |
+
+#### Planos e pagamento
+
+| Se | Então | Origem |
+|---|---|---|
+| O plano pedido não é `fan`, `cinefilo` ou `stalker` | `400` | `pagamentos/routes.js` |
+| O usuário é `admin` e tenta assinar | `403` | `pagamentos/routes.js` |
+| O plano pedido é igual ou inferior ao atual (considerando também as assinaturas ativas no Stripe) | `409`; só é possível subir de plano | `pagamentos/routes.js` |
+| O cliente pede um plano | Só o **nome** do plano vem do cliente; o preço é decidido no servidor | `pagamentos/routes.js` |
+| O webhook chega sem assinatura válida do Stripe | `400`, sem tocar no banco | `pagamentos/billing.js` |
+| O pagamento ainda não foi confirmado (`payment_status` diferente de `paid`) | Nada é promovido | `pagamentos/billing.js` |
+| O pagamento é confirmado | O papel é deduzido do **preço realmente cobrado**, nunca de dado do cliente | `pagamentos/billing.js` |
+| O usuário sobe de plano | A assinatura anterior é cancelada no Stripe, depois de gravar a nova e mudar o papel | `pagamentos/billing.js` |
+| Uma assinatura é cancelada | O papel passa a ser o do maior plano que ainda estiver ativo; se não sobrar nenhum, `espectador` | `pagamentos/billing.js` |
+| O usuário é `admin` | Nunca tem o papel alterado pelo fluxo de pagamento | `auth-service/internal.js` |
+| Uma rota interna é chamada sem o segredo `x-internal-key` correto (ou sem a variável configurada) | `403` | `auth-service/internal.js`, `pagamentos/routes.js` |
+| O usuário acabou de pagar | A página de sucesso não promove ninguém; só renova o JWT e redireciona quando o papel muda | `catalogo/routes.js`, `assinatura-sucesso.js` |
+
+#### Transversais
+
+| Se | Então | Origem |
+|---|---|---|
+| Favoritos, comentários, tier list, perfil ou checkout recebem mais de 20 escritas por minuto do mesmo IP | `429` | `catalogo/routes.js` |
+| A lista de filmes foi buscada há menos de 1 hora | Responde do cache, sem chamar a TMDB. Se a TMDB cair com cache vencido, serve o cache vencido | `catalogo/routes.js` |
+| O `log-service` ou o Redis está fora do ar | A ação do usuário continua normalmente; só o evento de log se perde | `catalogo/routes.js`, `logClient.js` |
+| Um serviço interno está fora do ar | O `catalogo` responde `502` | `catalogo/routes.js` |
+
+### 5. Modelo de dados
+
+Banco relacional: **MariaDB**. Os filmes **não** têm tabela, porque vêm da TMDB; `favoritos`, `comentarios` e `tier_list` guardam apenas o `tmdb_movie_id` (e, quando útil, título e pôster).
+
+```mermaid
+erDiagram
+    usuarios ||--o{ reset_tokens : "pede redefinição"
+    usuarios ||--o{ favoritos : "favorita"
+    usuarios ||--o{ comentarios : "escreve"
+    usuarios ||--o{ tier_list : "classifica"
+    usuarios ||--o| perfis : "tem"
+    usuarios ||--o| clientes_stripe : "assina"
+
+    usuarios {
+        int id PK
+        varchar nome
+        varchar email UK
+        varchar senha_hash
+        varchar role "papel RBAC"
+        timestamp criado_em
+    }
+    reset_tokens {
+        int id PK
+        varchar token UK
+        int usuario_id FK
+        datetime criado_em
+        datetime expira_em
+        boolean usado
+    }
+    favoritos {
+        int id PK
+        int usuario_id FK
+        int tmdb_movie_id "UK com usuario_id"
+        varchar titulo
+        varchar poster_path
+        timestamp criado_em
+    }
+    comentarios {
+        int id PK
+        int usuario_id FK
+        int tmdb_movie_id
+        text texto
+        timestamp criado_em
+    }
+    tier_list {
+        int id PK
+        int usuario_id FK
+        varchar usuario_nome "cópia do nome"
+        int tmdb_movie_id "UK com usuario_id"
+        varchar titulo
+        varchar poster_path
+        varchar tier "S A B C D"
+        timestamp atualizado_em
+    }
+    perfis {
+        int usuario_id PK, FK
+        varchar nome "cópia do nome"
+        varchar bio "até 280"
+        varchar foto_key "chave no Garage"
+        timestamp atualizado_em
+    }
+    clientes_stripe {
+        int usuario_id PK, FK
+        varchar stripe_customer_id UK
+        timestamp criado_em
+    }
+```
+
+| Relação | Cardinalidade | Ao apagar o usuário |
+|---|---|---|
+| `usuarios` → `reset_tokens` | 1 para N | Apaga os tokens (cascata) |
+| `usuarios` → `favoritos` | 1 para N; único por usuário e filme | **Bloqueia** a exclusão (sem cascata) |
+| `usuarios` → `comentarios` | 1 para N | **Bloqueia** a exclusão (sem cascata) |
+| `usuarios` → `tier_list` | 1 para N; único por usuário e filme | Apaga a tier list (cascata) |
+| `usuarios` → `perfis` | 1 para 0 ou 1 | Apaga o perfil (cascata) |
+| `usuarios` → `clientes_stripe` | 1 para 0 ou 1 | Apaga o vínculo (cascata) |
+
+**Dados que não estão no MariaDB**
+
+| O quê | Onde fica | Observação |
+|---|---|---|
+| Filmes (título, sinopse, pôster) | TMDB | Cache de 1 hora na memória do `catalogo` |
+| Plano e status da assinatura, cobranças | Stripe | Nosso banco só guarda quem é o cliente no Stripe (`clientes_stripe`) |
+| Foto de perfil (o arquivo) | Garage, bucket `avatars` (privado) | No banco fica só a chave em `perfis.foto_key` |
+| Log de auditoria | Redis Stream `logs:eventos` | Não é relacional; a fila de gravação é em memória |
+| Sessão | Não existe no servidor | É o JWT no cookie do navegador, válido por 15 minutos |
+
+### Pontos de atenção encontrados na leitura do código
+
+Coisas que um desenvolvedor que herda o projeto precisa saber antes de mexer:
+
+1. **O limite de tentativas de login provavelmente vale para todos os usuários juntos.** O `auth-service` só recebe chamadas do `catalogo`, não repassa o IP original e não configura `trust proxy`; então o IP que ele enxerga é sempre o do container do `catalogo`. Os 5 acessos por 15 minutos, compartilhados entre login e "esqueci a senha", seriam consumidos por todo mundo ao mesmo tempo.
+2. **Atrás de um proxy reverso**, o `catalogo` também não configura `trust proxy`: o IP usado no limite de escrita e gravado em `ip_origem` nos logs pode ser o do proxy, e não o do usuário.
+3. **O JWT não pode ser revogado.** O logout apaga o cookie, mas um token copiado continua válido até expirar (15 minutos). Mudanças de papel só aparecem com novo login ou com a renovação de token.
+4. **`tier` não é validado.** O backend só exige que exista; os valores S, A, B, C e D são uma convenção da interface (a coluna aceita até 2 caracteres).
+5. **O texto do comentário não tem limite de tamanho no backend** (a coluna é `TEXT`).
+6. **`GET /api/logs?limit=` repassa o valor sem validar** para o `log-service`.
+7. **`/redefinir-senha` não tem limite de requisições**; a proteção é só o token aleatório de 32 bytes.
+8. **Apagar um comentário pela moderação responde sucesso mesmo se o `id` não existir.**
+9. **`favoritos` e `comentarios` impedem a exclusão do usuário** (a chave estrangeira não tem cascata). Hoje não existe exclusão de conta, então isso ainda não aparece.
+10. **Nomes são cópias** (`tier_list.usuario_nome`, `perfis.nome`): se o nome mudar na conta, essas cópias não acompanham sozinhas.
+11. **Os limitadores de requisição guardam a contagem na memória do processo**: reiniciar o container zera tudo.
+12. **A fila de eventos do `log-service` é em memória**: um restart com eventos pendentes perde esses eventos (já documentado na seção do serviço).
