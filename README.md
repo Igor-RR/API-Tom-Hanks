@@ -88,13 +88,28 @@ O `log-service`, por sua vez, **não participa** dessa decisão de autorização
 https://github.com/Igor-RR/API-Tom-Hanks/actions/runs/35413640888
 ![alt text](test-pictures/tag-github-actions.png)
 
-- **Assinatura de um plano (Stripe, modo de teste)**: cenários passo a passo na seção [Planos pagos com Stripe](#planos-pagos-com-stripe-serviço-pagamentos)
+- **Assinatura de um plano (Stripe, modo de teste - Área restrita)**:
+![alt text](test-pictures/stripe-area-teste-webhook.png)
+
+- **Usuário antes do pagamento de um plano (a role deste usuário já havia sido promovida para cinéfilio no bd antes do serviço de pagemento)**:
+![alt text](test-pictures/usuario-antes-pagamento.png)
+
+- **Tela de Cobrança**:
+![alt text](test-pictures/tela-cobranca-stripe.png)
+
+- **Confirmando pagamento**:
+![alt text](test-pictures/confirmando-pagamento.png)
+
+- **Usuário depois do pagamento de um plano**:
+![alt text](test-pictures/usuario-depois-pagamento.png)
 
 - **Perfil com a foto de upload aparecendo de verdade**:
-![alt text](test-pictures/perfil-com-foto.png.png)
+![alt text](test-pictures/perfil-com-foto.png)
 
 - **Tentativa (recusada) de editar o perfil de outro usuário** — a requisição recebe `403` e o perfil alvo permanece intacto:
 ![alt text](test-pictures/teste-403-editar-perfil-outro-usuario.png)
+
+
 
 ## Arquitetura
 
