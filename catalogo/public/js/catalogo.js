@@ -14,6 +14,7 @@ const HIERARQUIA = ['espectador', 'fan', 'cinefilo', 'stalker','admin']
 
 let idsFavoritados = new Set()
 let contagemFavoritos = {}
+let comentariosPorFilme = {} // vem em lote no iniciar(): { tmdb_movie_id: [comentarios] }
 let meuUsuarioId = null
 let meuRole = 'espectador'
 
@@ -41,8 +42,8 @@ modalUpgrade.addEventListener('click', (evento) => {
   if (evento.target === modalUpgrade) fecharModalUpgrade()
 })
 modalBtnAssinar.addEventListener('click', () => {
-  // lógica de pagamento entra aqui futuramente -- por enquanto, não faz nada
-  fecharModalUpgrade()
+  // leva pra página de planos, onde o botão "Assinar" abre o checkout do Stripe
+  window.location.href = '/planos.html'
 })
 
 function mostrarStatus(texto) {
@@ -73,11 +74,13 @@ async function iniciar() {
 
     const chamadas = [fetch('/api/filmes'), fetch('/api/favoritos/contagem')]
     if (nivelAoMenos('fan')) {
-      chamadas.push(fetch('/api/favoritos'))
+      // favoritos do usuário e TODOS os comentários, cada um numa chamada só
+      // (antes eram 1 requisição de comentários POR CARD: o clássico N+1)
+      chamadas.push(fetch('/api/favoritos'), fetch('/api/comentarios'))
     }
 
     const respostas = await Promise.all(chamadas)
-    const [respostaFilmes, respostaContagem, respostaFavoritos] = respostas
+    const [respostaFilmes, respostaContagem, respostaFavoritos, respostaComentarios] = respostas
 
     const filmes = await respostaFilmes.json()
     const contagens = await respostaContagem.json()
@@ -86,6 +89,10 @@ async function iniciar() {
     if (respostaFavoritos) {
       const favoritos = await respostaFavoritos.json()
       idsFavoritados = new Set(favoritos.map(f => f.tmdb_movie_id))
+    }
+
+    if (respostaComentarios && respostaComentarios.ok) {
+      comentariosPorFilme = await respostaComentarios.json()
     }
 
     if (!respostaFilmes.ok) {
@@ -109,6 +116,7 @@ function renderizarFilmes(filmes) {
     const card = modeloCard.content.cloneNode(true)
 
     const poster = card.querySelector('.poster')
+    poster.loading = 'lazy' // não baixa os ~60 pôsteres de uma vez
     poster.src = filme.poster_url
     poster.alt = filme.titulo
 
@@ -134,9 +142,10 @@ function renderizarFilmes(filmes) {
     const listaComentarios = card.querySelector('.lista-comentarios')
     const botaoEnviarComentario = formComentario.querySelector('button')
 
-    // sempre carrega/tenta mostrar comentários -- backend decide o que devolve
+    // os comentários já vieram em lote no iniciar() (o backend decide o que cada papel vê):
+    // aqui só desenha, sem nenhuma requisição por card
     if (nivelAoMenos('fan')) {
-      carregarComentarios(filme.tmdb_movie_id, listaComentarios)
+      desenharComentarios(filme.tmdb_movie_id, listaComentarios)
     }
 
     formComentario.addEventListener('submit', async (evento) => {
@@ -198,45 +207,51 @@ async function alternarFavorito(filme, botao, contagemEl) {
 }
 
 // ---------- comentários ----------
+// desenha a lista de UM card a partir dos dados já em memória (sem rede)
+function desenharComentarios(tmdbMovieId, listaComentariosEl) {
+  const comentarios = comentariosPorFilme[tmdbMovieId] || []
+
+  listaComentariosEl.innerHTML = ''
+  comentarios.forEach(c => {
+    const item = document.createElement('li')
+
+    const textoSpan = document.createElement('span')
+    textoSpan.textContent = c.texto
+    item.appendChild(textoSpan)
+
+    const souDono = c.usuario_id === meuUsuarioId
+
+    // ícone de apagar sempre visível pra quem já vê comentários (fan+);
+    // ação real se for dono ou stalker, modal de upgrade caso contrário
+    const botaoApagar = document.createElement('button')
+    botaoApagar.textContent = '🗑'
+    botaoApagar.className = 'botao-apagar-comentario'
+    botaoApagar.addEventListener('click', async () => {
+      if (souDono) {
+        botaoApagar.disabled = true
+        await apagarComentarioProprio(c.id)
+        carregarComentarios(tmdbMovieId, listaComentariosEl)
+      } else if (nivelAoMenos('stalker')) {
+        botaoApagar.disabled = true
+        await apagarComentarioModeracao(c.id)
+        carregarComentarios(tmdbMovieId, listaComentariosEl)
+      } else {
+        abrirModalUpgrade('stalker')
+      }
+    })
+    item.appendChild(botaoApagar)
+
+    listaComentariosEl.appendChild(item)
+  })
+}
+
+// recarrega só os comentários DESTE filme (1 requisição) -- usado depois de comentar/apagar
 async function carregarComentarios(tmdbMovieId, listaComentariosEl) {
   try {
     const resposta = await fetch(`/api/comentarios/${tmdbMovieId}`)
     if (!resposta.ok) return
-    const comentarios = await resposta.json()
-
-    listaComentariosEl.innerHTML = ''
-    comentarios.forEach(c => {
-      const item = document.createElement('li')
-
-      const textoSpan = document.createElement('span')
-      textoSpan.textContent = c.texto
-      item.appendChild(textoSpan)
-
-      const souDono = c.usuario_id === meuUsuarioId
-
-      // ícone de apagar sempre visível pra quem já vê comentários (fan+);
-      // ação real se for dono ou stalker, modal de upgrade caso contrário
-      const botaoApagar = document.createElement('button')
-      botaoApagar.textContent = '🗑'
-      botaoApagar.className = 'botao-apagar-comentario'
-      botaoApagar.addEventListener('click', async () => {
-        if (souDono) {
-          botaoApagar.disabled = true
-          await apagarComentarioProprio(c.id)
-          carregarComentarios(tmdbMovieId, listaComentariosEl)
-        } else if (nivelAoMenos('stalker')) {
-          botaoApagar.disabled = true
-          await apagarComentarioModeracao(c.id)
-          carregarComentarios(tmdbMovieId, listaComentariosEl)
-        } else {
-          abrirModalUpgrade('stalker')
-        }
-      })
-      item.appendChild(botaoApagar)
-
-      listaComentariosEl.appendChild(item)
-    })
-
+    comentariosPorFilme[tmdbMovieId] = await resposta.json()
+    desenharComentarios(tmdbMovieId, listaComentariosEl)
   } catch (err) {
     // silencioso -- não trava o card por causa de um erro de comentário
   }
