@@ -10,7 +10,7 @@ Projeto desenvolvido para a disciplina ministrada pelo professor **@siriani**.
 
 - Cadastro e login próprios da aplicação, com sessão via **JWT em cookie httpOnly**
 - 5 papéis de usuário hierárquicos (`espectador` < `fan` < `cinefilo` < `stalker` < `admin`), cada um herdando as permissões do anterior
-- Recuperação de senha por e-mail, com token de expiração de 15 minutos e uso único
+- Recuperação de senha por e-mail, com token de expiração de 30 minutos e uso único.
 - Listagem de filmes com Tom Hanks, buscados ao vivo na API do TMDB (pôster, título e sinopse nunca são salvos localmente)
 - Contagem pública de favoritos por filme, visível a qualquer usuário logado
 - Favoritar / desfavoritar filmes e comentar (a partir do papel `fan`)
