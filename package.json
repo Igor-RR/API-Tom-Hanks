@@ -1,0 +1,11 @@
+{
+  "name": "catalogo-filmes-tom-hanks",
+  "private": true,
+  "scripts": {
+    "stripe:login": "stripe login",
+    "stripe:listen": "stripe listen --events checkout.session.completed,customer.subscription.deleted --forward-to localhost:3000/api/stripe/webhook"
+  },
+  "devDependencies": {
+    "@stripe/cli": "^1.53.1"
+  }
+}

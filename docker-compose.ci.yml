@@ -1,0 +1,71 @@
+# Usado SOMENTE pelo pipeline de CI, combinado com o docker-compose.yml
+# principal:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --wait
+#
+# Adiciona um MariaDB efêmero (sem volume, dados descartados ao final do job)
+# e aponta DB_HOST do catalogo/auth-service para ele, mantendo tudo na mesma
+# rede Docker criada pelo compose -- por isso o catalogo/auth-service
+# conseguem resolver "mariadb" pelo nome, igual já fazem com "auth-service"
+# e "log-service".
+
+services:
+  mariadb:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: teste
+      MYSQL_DATABASE: catalogo_test
+      MYSQL_USER: catalogo_test
+      MYSQL_PASSWORD: teste
+    healthcheck:
+      # healthcheck.sh vem embutido na imagem oficial do MariaDB e sabe
+      # diferenciar "ainda inicializando" de "com problema de verdade" --
+      # mais confiável que um "mysqladmin ping" cru, que pode falhar
+      # transitoriamente durante a fase interna de setup do container.
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  catalogo:
+    environment:
+      - DB_HOST=mariadb
+      - DB_USER=catalogo_test
+      - DB_PASSWORD=teste
+      - DB_NAME=catalogo_test
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      log-service:
+        condition: service_started
+
+  auth-service:
+    environment:
+      - DB_HOST=mariadb
+      - DB_USER=catalogo_test
+      - DB_PASSWORD=teste
+      - DB_NAME=catalogo_test
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      log-service:
+        condition: service_started
+
+  # pagamentos usa o mesmo MariaDB efêmero. As chaves do Stripe vêm do .env.ci (valores
+  # fake): no CI não há cobrança de verdade, só se testa o caminho do webhook e as rotas.
+  pagamentos:
+    environment:
+      - DB_HOST=mariadb
+      - DB_USER=catalogo_test
+      - DB_PASSWORD=teste
+      - DB_NAME=catalogo_test
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      log-service:
+        condition: service_started

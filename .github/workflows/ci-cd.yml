@@ -1,0 +1,249 @@
+name: CI/CD
+
+# Só roda em push na main -- sem branches de desenvolvimento paralelas neste projeto
+on:
+  push:
+    branches: [main]
+
+jobs:
+  # ---------- JOB 1: builda e testa de ponta a ponta ----------
+  # Se qualquer passo aqui falhar, o job 2 nunca roda (needs: build-and-test)
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Criar .env de teste (valores fake, exclusivos de CI)
+        run: cp .github/ci/.env.ci .env
+
+      - name: Buildar imagens e subir o ambiente de teste
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml \
+            up -d --build --wait --wait-timeout 180
+
+      - name: Aplicar schema no banco de teste
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml \
+            exec -T mariadb mariadb -u root -pteste catalogo_test < .github/ci/schema.sql
+
+      - name: Aguardar o catálogo responder
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000 > /dev/null; then
+              echo "Catálogo no ar."
+              exit 0
+            fi
+            echo "Aguardando catálogo subir... ($i/30)"
+            sleep 2
+          done
+          echo "Catálogo não respondeu a tempo."
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+          exit 1
+
+      # Este é o teste que efetivamente prova que o código funciona: cadastra
+      # um usuário de verdade e faz login de verdade, checando o status HTTP.
+      # Se qualquer uma dessas chamadas falhar, o job (e o pipeline) quebra aqui.
+      # OBSERVAÇÃO: profile-service e Garage ainda não fazem parte deste teste de
+      # ponta a ponta -- só sobem e são publicados, upload de foto continua
+      # validado manualmente (ver README, seção do profile-service).
+      - name: Testar cadastro e login
+        run: |
+          EMAIL="ci-teste-$(date +%s)@exemplo.com"
+          SENHA="senha123456"
+
+          echo "Cadastrando usuário de teste ($EMAIL)..."
+          STATUS_CADASTRO=$(curl -s -o /tmp/cadastro.json -w "%{http_code}" -X POST http://localhost:3000/api/auth/cadastro \
+            -H "Content-Type: application/json" \
+            -d "{\"nome\":\"CI Teste\",\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}")
+
+          echo "Status HTTP do cadastro: $STATUS_CADASTRO"
+          cat /tmp/cadastro.json
+          echo ""
+
+          if [ "$STATUS_CADASTRO" != "201" ]; then
+            echo ""
+            echo "Cadastro falhou -- pipeline quebrado."
+            exit 1
+          fi
+
+          echo ""
+          echo "Fazendo login..."
+          STATUS_LOGIN=$(curl -s -o /tmp/login.json -w "%{http_code}" -X POST http://localhost:3000/api/auth/login \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}")
+
+          echo "Status HTTP do login: $STATUS_LOGIN"
+          cat /tmp/login.json
+          echo ""
+
+          if [ "$STATUS_LOGIN" != "200" ]; then
+            echo ""
+            echo "Login falhou -- pipeline quebrado."
+            exit 1
+          fi
+
+          echo ""
+          echo "Cadastro e login OK -- rota de autenticação está funcionando."
+
+      # Pagamentos (Stripe): no CI não dá pra cobrar de verdade (as chaves são fake), mas dá pra
+      # provar o que mais quebra nessa integração: o webhook passando CRU pelo catalogo até o
+      # serviço pagamentos (assinatura válida -> 200; ausente ou forjada -> 400), a rota de
+      # checkout protegida por login, e a renovação de token -- que exercita a rota interna do
+      # auth-service com a INTERNAL_API_KEY, ou seja, a fiação entre os três serviços.
+      - name: Testar pagamentos (webhook, checkout protegido e renovação de token)
+        run: |
+          falhar() { echo ""; echo "FALHOU: $1 -- pipeline quebrado."; exit 1; }
+
+          URL="http://localhost:3000"
+          PAYLOAD='{"id":"evt_ci","object":"event","type":"ping","data":{"object":{}}}'
+
+          echo "1) Webhook SEM assinatura (esperado 400)..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/api/stripe/webhook" \
+            -H "Content-Type: application/json" -d "$PAYLOAD")
+          echo "   status: $STATUS"
+          [ "$STATUS" = "400" ] || falhar "webhook sem assinatura deveria responder 400"
+
+          echo "2) Webhook com assinatura FORJADA (esperado 400)..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/api/stripe/webhook" \
+            -H "Content-Type: application/json" -H "stripe-signature: t=1,v1=abc" -d "$PAYLOAD")
+          echo "   status: $STATUS"
+          [ "$STATUS" = "400" ] || falhar "webhook com assinatura forjada deveria responder 400"
+
+          echo "3) Webhook com assinatura VÁLIDA (esperado 200)..."
+          # o Stripe assina "<timestamp>.<corpo>" com HMAC-SHA256 usando o segredo do endpoint.
+          # Se o corpo chegar alterado ao serviço pagamentos, esta verificação falha.
+          SEGREDO=$(grep '^STRIPE_WEBHOOK_SECRET=' .env | cut -d= -f2- | tr -d '\r')
+          [ -n "$SEGREDO" ] || falhar "STRIPE_WEBHOOK_SECRET ausente do .env.ci"
+          TS=$(date +%s)
+          ASSINATURA=$(printf '%s' "$TS.$PAYLOAD" | openssl dgst -sha256 -hmac "$SEGREDO" | sed 's/^.* //')
+          STATUS=$(curl -s -o /tmp/webhook.txt -w "%{http_code}" -X POST "$URL/api/stripe/webhook" \
+            -H "Content-Type: application/json" -H "stripe-signature: t=$TS,v1=$ASSINATURA" -d "$PAYLOAD")
+          echo "   status: $STATUS"
+          [ "$STATUS" = "200" ] || { cat /tmp/webhook.txt; falhar "webhook com assinatura válida deveria responder 200"; }
+
+          echo "4) Checkout sem login (esperado 401)..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/api/assinatura/checkout" \
+            -H "Content-Type: application/json" -d '{"plano":"fan"}')
+          echo "   status: $STATUS"
+          [ "$STATUS" = "401" ] || falhar "checkout sem login deveria responder 401"
+
+          echo "5) Renovação de token (cadastro -> login -> renovar)..."
+          EMAIL="ci-pagamentos-$(date +%s)@exemplo.com"
+          SENHA="senha123456"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/api/auth/cadastro" \
+            -H "Content-Type: application/json" \
+            -d "{\"nome\":\"CI Pagamentos\",\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}")
+          [ "$STATUS" = "201" ] || falhar "cadastro do usuário de teste falhou (status $STATUS)"
+
+          STATUS=$(curl -s -D /tmp/login-headers.txt -o /dev/null -w "%{http_code}" -X POST "$URL/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}")
+          [ "$STATUS" = "200" ] || falhar "login do usuário de teste falhou (status $STATUS)"
+
+          # o cookie é Secure (só vai por HTTPS), então o token é lido do Set-Cookie e enviado à mão
+          TOKEN=$(sed -nE 's/^[Ss]et-[Cc]ookie: token=([^;]+);.*/\1/p' /tmp/login-headers.txt | head -n 1)
+          [ -n "$TOKEN" ] || falhar "o login não devolveu o cookie de sessão"
+
+          STATUS=$(curl -s -o /tmp/renovar.json -w "%{http_code}" -X POST "$URL/api/auth/renovar" \
+            -H "Cookie: token=$TOKEN")
+          echo "   status: $STATUS"
+          cat /tmp/renovar.json; echo ""
+          [ "$STATUS" = "200" ] || falhar "renovação de token falhou (catalogo -> auth-service /internos)"
+          grep -q '"role":"espectador"' /tmp/renovar.json || falhar "renovação não devolveu o papel esperado"
+
+          echo ""
+          echo "Pagamentos OK -- webhook, checkout protegido e renovação de token funcionando."
+
+      - name: Logs dos containers (em caso de falha)
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+
+      - name: Encerrar ambiente de teste
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
+
+  # ---------- JOB 2: publica as imagens e aciona o deploy ----------
+  # Só começa se build-and-test passou -- é isso que garante que uma imagem
+  # quebrada nunca chega a ser publicada nem implantada.
+  build-and-push:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Definir tag rastreável do commit
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Login no Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push -- catalogo
+        uses: docker/build-push-action@v6
+        with:
+          context: ./catalogo
+          push: true
+          tags: |
+            igorrueda/api-tom-hanks-microserv-catalogo:latest
+            igorrueda/api-tom-hanks-microserv-catalogo:sha-${{ steps.vars.outputs.sha_short }}
+
+      - name: Build & push -- auth-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./auth-service
+          push: true
+          tags: |
+            igorrueda/api-tom-hanks-microserv-auth-service:latest
+            igorrueda/api-tom-hanks-microserv-auth-service:sha-${{ steps.vars.outputs.sha_short }}
+
+      - name: Build & push -- log-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./log-service
+          push: true
+          tags: |
+            igorrueda/api-tom-hanks-microserv-log-service:latest
+            igorrueda/api-tom-hanks-microserv-log-service:sha-${{ steps.vars.outputs.sha_short }}
+
+      # NOVO -- sem isso, a imagem do profile-service nunca existe no Docker Hub e
+      # o Portainer falha o deploy dessa stack ("pull access denied").
+      # O Garage NÃO entra aqui: é a imagem oficial dxflrs/garage, publicada por
+      # terceiros -- não tem código nosso pra buildar nem publicar.
+      - name: Build & push -- profile-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./upload-profile/profile-service
+          push: true
+          tags: |
+            igorrueda/api-tom-hanks-microserv-profile-service:latest
+            igorrueda/api-tom-hanks-microserv-profile-service:sha-${{ steps.vars.outputs.sha_short }}
+
+      # NOVO -- serviço de pagamentos (Stripe). Sem esta imagem no Docker Hub, o Portainer
+      # falha o deploy da stack ("pull access denied"), igual ao caso do profile-service.
+      - name: Build & push -- pagamentos
+        uses: docker/build-push-action@v6
+        with:
+          context: ./pagamentos
+          push: true
+          tags: |
+            igorrueda/api-tom-hanks-microserv-pagamentos:latest
+            igorrueda/api-tom-hanks-microserv-pagamentos:sha-${{ steps.vars.outputs.sha_short }}
+
+      # DEPLOY: não automatizado nesta versão. Ver README, seção "Deploy",
+      # para o passo manual que fecha o restante do fluxo.
+      - name: Lembrete de deploy manual
+        run: |
+          echo "Imagens publicadas com sucesso:"
+          echo "  igorrueda/api-tom-hanks-microserv-catalogo:sha-${{ steps.vars.outputs.sha_short }}"
+          echo "  igorrueda/api-tom-hanks-microserv-auth-service:sha-${{ steps.vars.outputs.sha_short }}"
+          echo "  igorrueda/api-tom-hanks-microserv-log-service:sha-${{ steps.vars.outputs.sha_short }}"
+          echo "  igorrueda/api-tom-hanks-microserv-profile-service:sha-${{ steps.vars.outputs.sha_short }}"
+          echo "  igorrueda/api-tom-hanks-microserv-pagamentos:sha-${{ steps.vars.outputs.sha_short }}"
+          echo ""
+          echo "Deploy automático pendente (ver README) -- atualize a stack"
+          echo "manualmente no Portainer: 'Re-pull image and redeploy'."

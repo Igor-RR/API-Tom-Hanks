@@ -1,0 +1,74 @@
+services:
+  catalogo:
+    build: ./catalogo
+    image: igorrueda/api-tom-hanks-microserv-catalogo:latest
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - auth-service
+      - log-service
+      - profile-service
+      - pagamentos
+
+  auth-service:
+    build: ./auth-service
+    image: igorrueda/api-tom-hanks-microserv-auth-service:latest
+    env_file: .env
+    depends_on:
+      - log-service
+
+  pagamentos:
+    build: ./pagamentos
+    image: igorrueda/api-tom-hanks-microserv-pagamentos:latest
+    # sem "ports:" -- só o catalogo fala com ele (checkout e webhook do Stripe entram
+    # pelo catalogo, que repassa pela rede interna). Guarda a chave do Stripe.
+    env_file: .env
+    depends_on:
+      - auth-service
+      - log-service
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # sem "ports:" -- mesmo princípio do auth-service: só acessível pela
+    # rede interna do Docker, nunca pela internet
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  log-service:
+    build: ./log-service
+    image: igorrueda/api-tom-hanks-microserv-log-service:latest
+    # sem "ports:" -- não publicado pro host
+    env_file: .env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  garage:
+    image: dxflrs/garage:v2.0.0
+    # SEM "ports:" -- o navegador nunca fala com o Garage direto. Essa hospedagem só
+    # roteia de forma confiável a porta principal do projeto (a do catalogo); uma porta
+    # extra publicada aqui não é estável (testado e confirmado). Quem fala com o Garage
+    # é só o profile-service, pela rede interna do Docker.
+    volumes:
+      - ./upload-profile/garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    restart: unless-stopped
+
+  profile-service:
+    build: ./upload-profile/profile-service
+    image: igorrueda/api-tom-hanks-microserv-profile-service:latest
+    container_name: profile-service
+    env_file: .env
+    depends_on:
+      - garage
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  garage-meta:
+  garage-data:

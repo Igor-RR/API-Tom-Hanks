@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tier Lists — Tom Hanks</title>
+  <link rel="stylesheet" href="css/index.css">
+</head>
+<body class="pagina-catalogo">
+  <header class="topo">
+    <h1>Tier Lists</h1>
+    <div class="area-usuario">
+      <a href="catalogo.html" class="botao-secundario">Voltar ao catálogo</a>
+    </div>
+  </header>
+
+  <main>
+    <p id="mensagem-status" class="status" hidden></p>
+    <div id="lista-stalkers" class="grade-stalkers"></div>
+  </main>
+
+  <template id="modelo-card-stalker">
+    <a class="card-stalker">
+      <span class="nome-stalker"></span>
+      <span class="contagem-stalker"></span>
+    </a>
+  </template>
+
+  <div id="modal-upgrade" class="modal-overlay" hidden>
+    <div class="modal-caixa">
+      <h2 id="modal-titulo">Recurso bloqueado</h2>
+      <p id="modal-texto">Essa ação exige um plano superior.</p>
+      <div class="modal-botoes">
+        <button id="modal-btn-cancelar" class="botao-modal-cancelar">Agora não</button>
+        <button id="modal-btn-assinar">Assinar plano</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/tier-list.js"></script>
+</body>
+</html>
